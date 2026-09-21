@@ -157,3 +157,7 @@ button{touch-action:manipulation}
   .welcome{padding:15px 0}
   .welcome-icon{width:50px;height:50px}
 }
+
+.media-bubble{width:min(720px,100%)}
+.generated-media{display:block;width:min(100%,720px);max-height:620px;object-fit:contain;border-radius:14px;border:1px solid var(--border);background:#080b11;box-shadow:0 12px 40px rgba(0,0,0,.28)}
+.media-label{font-size:10px;color:var(--muted);margin-top:7px}
