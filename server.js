@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = Number(process.env.PORT) || 10000;
 const model = "openai/gpt-oss-20b";
-const geminiModel = "gemini-2.5-flash";
+const geminiModel = "gemini-3.6-flash";
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabasePublishableKey =
@@ -56,7 +56,7 @@ app.get("/api/config", (_req, res) =>
     supabasePublishableKey: authEnabled ? supabasePublishableKey : null,
     models: [
       { id: model, name: "GPT-OSS 20B", free: true },
-      { id: geminiModel, name: "Gemini 2.5 Flash", free: true, multimodal: true }
+      { id: geminiModel, name: "Gemini 3.6 Flash", free: true, multimodal: true }
     ]
   })
 );
