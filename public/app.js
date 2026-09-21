@@ -830,9 +830,6 @@ menuButton.addEventListener("click", () => {
 
 sidebarBackdrop.addEventListener("click", closeSidebar);
 
-setup();
-
-
 window.addEventListener("error", event => {
   console.error("ProjectSyntra UI error:", event.error || event.message);
 });
