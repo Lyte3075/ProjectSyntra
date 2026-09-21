@@ -33,6 +33,7 @@ let conversation = [];
 let pendingFiles = [];
 let authMode = "login";
 let selectedModel = "openai/gpt-oss-20b";
+let availableModels = [];
 let supabaseClient = null;
 let authEnabled = false;
 let currentUser = null;
@@ -347,15 +348,20 @@ function renderAttachments() {
 }
 
 async function readFile(file) {
-  const max = 700 * 1024;
-  if (file.size > max) throw new Error(`${file.name} is too large. Keep text files under 700 KB.`);
-  const text = await file.text();
-  return {
-    name: file.name,
-    size: file.size,
-    type: file.type || "text/plain",
-    text
-  };
+  const max = 2 * 1024 * 1024;
+  if (file.size > max) throw new Error(file.name + " is too large. Keep files under 2 MB.");
+  const type = file.type || "application/octet-stream";
+  const multimodal = type.startsWith("image/") || type === "application/pdf";
+  if (multimodal) {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Could not read " + file.name));
+      reader.readAsDataURL(file);
+    });
+    return { name: file.name, size: file.size, type, data: String(dataUrl).split(",")[1] || "", multimodal: true };
+  }
+  return { name: file.name, size: file.size, type, text: await file.text(), multimodal: false };
 }
 
 async function addFiles(fileList) {
@@ -399,7 +405,8 @@ async function requestAnswer() {
     headers: Object.assign({ "Content-Type": "application/json" }, t ? { Authorization: "Bearer " + t } : {}),
     body: JSON.stringify({
       model: selectedModel,
-      messages: [{ role: "system", content: personality() }, ...conversation]
+      messages: [{ role: "system", content: personality() }, ...conversation],
+      attachments: pendingFiles.filter(f => f.multimodal && f.data).map(f => ({ name: f.name, mimeType: f.type, data: f.data }))
     })
   });
 
@@ -539,10 +546,12 @@ async function setup() {
   authEnabled = !!config.authEnabled;
 
   if (config.models?.length) {
-    selectedModel = config.models[0].id;
+    availableModels = config.models || [];
+    selectedModel = availableModels[0].id;
     modelSelect.innerHTML = config.models[0].name + " <span>⌄</span>";
-    $("#modelLabel").textContent = config.models[0].name;
-    $("#sidebarModel").textContent = config.models[0].name;
+    $("#modelLabel").textContent = availableModels[0].name;
+    $("#sidebarModel").textContent = availableModels[0].name;
+    modelMenu.innerHTML = availableModels.map(function(m){ return "<button type=\"button\" data-model=\"" + esc(m.id) + "\"><span>" + esc(m.name) + "</span><small>" + (m.free ? "Free" : "") + "</small></button>"; }).join("");
   }
 
   if (authEnabled && window.supabase) {
