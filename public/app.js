@@ -290,6 +290,51 @@ function render() {
   conversation.forEach((m, index) => addMessage(m.role, m.content, false, index));
 }
 
+function addMediaMessage(event) {
+  document.querySelector(".welcome")?.remove();
+
+  const row = document.createElement("div");
+  row.className = "message assistant";
+
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  avatar.textContent = "S";
+
+  const contentWrap = document.createElement("div");
+  contentWrap.className = "message-content";
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble media-bubble";
+
+  if (event.mediaType === "video") {
+    const video = document.createElement("video");
+    video.className = "generated-media";
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.src = "data:" + (event.mimeType || "video/mp4") + ";base64," + event.data;
+    bubble.appendChild(video);
+  } else {
+    const image = document.createElement("img");
+    image.className = "generated-media";
+    image.alt = "Generated image";
+    image.loading = "lazy";
+    image.src = "data:" + (event.mimeType || "image/png") + ";base64," + event.data;
+    bubble.appendChild(image);
+  }
+
+  const label = document.createElement("div");
+  label.className = "media-label";
+  label.textContent = event.mediaType === "video" ? "🎬 Generated video" : "🖼️ Generated image";
+  bubble.appendChild(label);
+
+  contentWrap.appendChild(bubble);
+  row.append(avatar, contentWrap);
+  messagesEl.appendChild(row);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return row;
+}
+
 function addMessage(role, content, typing = false, index = -1) {
   document.querySelector(".welcome")?.remove();
   const row = document.createElement("div");
@@ -441,6 +486,7 @@ async function requestAnswer() {
   }
 
   let answer = "";
+  let mediaEvent = null;
   const bubble = addMessage("assistant", "Thinking…", true);
   if (!response.body) throw Error("The server returned no response stream.");
   const reader = response.body.getReader();
@@ -466,12 +512,35 @@ async function requestAnswer() {
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
 
+      if (event.type === "media") {
+        mediaEvent = event;
+        bubble.classList.remove("typing");
+        bubble.innerHTML = "";
+        const media = document.createElement(event.mediaType === "video" ? "video" : "img");
+        media.className = "generated-media";
+        if (event.mediaType === "video") {
+          media.controls = true;
+          media.playsInline = true;
+          media.preload = "metadata";
+        } else {
+          media.alt = "Generated image";
+          media.loading = "lazy";
+        }
+        media.src = "data:" + (event.mimeType || (event.mediaType === "video" ? "video/mp4" : "image/png")) + ";base64," + event.data;
+        bubble.appendChild(media);
+        const label = document.createElement("div");
+        label.className = "media-label";
+        label.textContent = event.mediaType === "video" ? "🎬 Generated video" : "🖼️ Generated image";
+        bubble.appendChild(label);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
       if (event.type === "error") throw Error(event.error);
     }
   }
 
-  if (!answer) answer = "The model returned an empty response.";
-  conversation.push({ role: "assistant", content: answer });
+  if (!answer && !mediaEvent) answer = "The model returned an empty response.";
+  conversation.push({ role: "assistant", content: answer || (mediaEvent ? "[" + (mediaEvent.mediaType === "video" ? "Generated video" : "Generated image") + "]" : "") });
   persist();
 }
 
