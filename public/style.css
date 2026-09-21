@@ -35,6 +35,17 @@ button{touch-action:manipulation}
 .history-item{width:100%;border:1px solid transparent;background:transparent;color:#d9deea;border-radius:10px;padding:10px 11px;text-align:left;cursor:pointer}
 .history-item:hover{background:#121721;border-color:#202635}
 .history-item.active{background:#171b29;border-color:#302b52}
+.history-item-wrap{position:relative;display:flex;align-items:stretch;gap:3px}
+.history-item-wrap .history-item{flex:1;min-width:0}
+.history-actions{display:flex;align-items:center;gap:2px;opacity:0;transition:opacity .15s ease}
+.history-item-wrap:hover .history-actions,.history-item-wrap.active .history-actions{opacity:1}
+.history-actions button{width:26px;height:30px;border:1px solid transparent;background:transparent;color:var(--muted);border-radius:7px;cursor:pointer}
+.history-actions button:hover{background:#1a1f2c;border-color:var(--border);color:#fff}
+.message-content{min-width:0;max-width:calc(100% - 42px)}
+.message-actions{display:flex;gap:6px;margin-top:6px;opacity:0;transition:opacity .15s ease}
+.message:hover .message-actions,.message:focus-within .message-actions{opacity:1}
+.message-actions button{border:1px solid transparent;background:transparent;color:var(--muted);border-radius:7px;padding:3px 7px;font-size:10px;cursor:pointer}
+.message-actions button:hover{background:#151a24;border-color:var(--border);color:#fff}
 .history-item span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
 .history-item small{display:block;color:var(--muted2);font-size:10px;margin-top:4px}
 .sidebar-spacer{flex:1}
@@ -115,6 +126,9 @@ button{touch-action:manipulation}
 .model-menu small{color:var(--good)}
 .sidebar-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:35}
 @media(max-width:760px){
+  .history-actions{opacity:1}
+  .message-actions{opacity:1}
+
   body{overflow:hidden}
   .sidebar{position:fixed;z-index:40;left:0;top:0;bottom:0;transform:translateX(-102%);transition:transform .2s ease;box-shadow:30px 0 80px rgba(0,0,0,.4)}
   .sidebar.open{transform:translateX(0)}
