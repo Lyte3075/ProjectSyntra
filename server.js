@@ -36,7 +36,7 @@ app.use(express.static(path.join(__dirname, "public"), {
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    model: "union-alpha",
+    model: "union-alpha-free",
     configured: Boolean(process.env.TOKENRA_API_KEY)
   });
 });
@@ -66,7 +66,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const completion = await client.chat.completions.create({
-      model: "union-alpha",
+      model: "union-alpha-free",
       messages: safeMessages,
       max_tokens: 4096,
       temperature: 0.7
@@ -77,7 +77,7 @@ app.post("/api/chat", async (req, res) => {
     res.json({
       message,
       usage: completion.usage ?? null,
-      model: completion.model ?? "union-alpha"
+      model: completion.model ?? "union-alpha-free"
     });
   } catch (error) {
     console.error(error);
