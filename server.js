@@ -9,14 +9,15 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
+const model = "openai/gpt-oss-20b";
 
-if (!process.env.TOKENRA_API_KEY) {
-  console.warn("TOKENRA_API_KEY is not set. Add it as a server environment variable.");
+if (!process.env.GROQ_API_KEY) {
+  console.warn("GROQ_API_KEY is not set. Add it as a server environment variable.");
 }
 
 const client = new OpenAI({
-  baseURL: "https://tokenra.io/v1",
-  apiKey: process.env.TOKENRA_API_KEY
+  baseURL: "https://api.groq.com/openai/v1",
+  apiKey: process.env.GROQ_API_KEY
 });
 
 app.disable("x-powered-by");
@@ -36,8 +37,8 @@ app.use(express.static(path.join(__dirname, "public"), {
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    model: "union-alpha-free",
-    configured: Boolean(process.env.TOKENRA_API_KEY)
+    model,
+    configured: Boolean(process.env.GROQ_API_KEY)
   });
 });
 
@@ -49,7 +50,7 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "messages must be a non-empty array." });
     }
 
-    if (!process.env.TOKENRA_API_KEY) {
+    if (!process.env.GROQ_API_KEY) {
       return res.status(503).json({ error: "The server API key has not been configured yet." });
     }
 
@@ -66,7 +67,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const completion = await client.chat.completions.create({
-      model: "union-alpha-free",
+      model,
       messages: safeMessages,
       max_tokens: 4096,
       temperature: 0.7
@@ -77,7 +78,7 @@ app.post("/api/chat", async (req, res) => {
     res.json({
       message,
       usage: completion.usage ?? null,
-      model: completion.model ?? "union-alpha-free"
+      model: completion.model ?? model
     });
   } catch (error) {
     console.error(error);
