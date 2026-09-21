@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090b12">
+  <title>Union Alpha Chat</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">U</div>
+        <div>
+          <strong>Union Alpha</strong>
+          <span>AI Chat</span>
+        </div>
+      </div>
+
+      <button id="newChat" class="new-chat">＋ New chat</button>
+
+      <div class="sidebar-card">
+        <div class="status-dot"></div>
+        <div>
+          <strong>Connected locally</strong>
+          <span>Your API key stays on the server.</span>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <span>Model</span>
+        <code>union-alpha</code>
+      </div>
+    </aside>
+
+    <main class="chat">
+      <header class="topbar">
+        <div>
+          <h1>Union Alpha</h1>
+          <p>Private API-key proxy · OpenAI-compatible</p>
+        </div>
+        <button id="clearChat" class="icon-button" title="Clear conversation">⌫</button>
+      </header>
+
+      <section id="messages" class="messages">
+        <div class="welcome">
+          <div class="welcome-icon">✦</div>
+          <h2>What are we building today?</h2>
+          <p>Ask Union Alpha anything. Your conversation is kept in this browser until you start a new chat.</p>
+          <div class="suggestions">
+            <button>Explain quantum computing simply</button>
+            <button>Help me build a JavaScript game</button>
+            <button>Review this idea and find edge cases</button>
+          </div>
+        </div>
+      </section>
+
+      <form id="chatForm" class="composer">
+        <textarea id="input" rows="1" placeholder="Message Union Alpha..." autocomplete="off"></textarea>
+        <button id="send" type="submit" aria-label="Send message">➤</button>
+      </form>
+      <p class="disclaimer">Union Alpha responses can be incorrect. Verify important information.</p>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
