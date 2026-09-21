@@ -55,6 +55,7 @@ app.get("/api/config", (_req, res) =>
     supabaseUrl: authEnabled ? supabaseUrl : null,
     supabasePublishableKey: authEnabled ? supabasePublishableKey : null,
     models: [
+      { id: "auto", name: "Auto", free: true, description: "Chooses the best available model for each request" },
       { id: model, name: "GPT-OSS 20B", free: true },
       { id: geminiModel, name: "Gemini 3.6 Flash", free: true, multimodal: true }
     ]
@@ -94,6 +95,65 @@ async function authenticate(req, res) {
   return data.user;
 }
 
+function latestUserPrompt(messages) {
+  return [...messages].reverse().find(m => m.role === "user")?.content || "";
+}
+
+function chooseModel({ messages, attachments }) {
+  if (attachments.length) return geminiModel;
+
+  const prompt = latestUserPrompt(messages).toLowerCase();
+
+  const visionOrMedia = /\b(image|photo|picture|screenshot|pdf|document|diagram|chart|visual|look at|see this|analyze this)\b/.test(prompt);
+  const deepReasoning = /\b(reason|reasoning|prove|proof|derive|derivation|debug|debugging|analyze|analysis|compare|comparison|math|mathematics|algorithm|architecture|edge case|trade-?off|explain why)\b/.test(prompt);
+  const creative = /\b(write|rewrite|story|poem|lyrics|creative|brainstorm|idea|ideas|name|names|concept|script|dialogue)\b/.test(prompt);
+  const coding = /\b(code|coding|program|programming|javascript|typescript|python|html|css|sql|api|function|bug|error|compile|compiler|syntax|repository|github|singulax)\b/.test(prompt);
+
+  if (visionOrMedia || deepReasoning) return geminiModel;
+  if (coding || creative) return model;
+
+  return model;
+}
+
+async function createGeminiStream(contents) {
+  if (!gemini) {
+    throw Object.assign(new Error("Gemini is not configured on the server."), { status: 503 });
+  }
+
+  const delays = [1500, 3000, 6000];
+  let lastError;
+
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await gemini.models.generateContentStream({
+        model: geminiModel,
+        contents
+      });
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.status || error?.code);
+      const message = String(error?.message || "");
+      const retryable = status === 503 || /\bUNAVAILABLE\b|high demand|temporarily|overload/i.test(message);
+
+      if (!retryable || attempt === delays.length) throw error;
+
+      console.warn(
+        "Gemini temporarily unavailable. Retrying in " +
+          delays[attempt] +
+          "ms (attempt " +
+          (attempt + 2) +
+          "/" +
+          (delays.length + 1) +
+          ")."
+      );
+
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+    }
+  }
+
+  throw lastError;
+}
+
 async function streamGemini({ messages, attachments, res }) {
   if (!gemini) throw Object.assign(new Error("Gemini is not configured on the server."), { status: 503 });
 
@@ -126,10 +186,7 @@ async function streamGemini({ messages, attachments, res }) {
     text: "Respond to the user's latest request. You are the multimodal side of ProjectSyntra. Analyze attached images/documents/files when present. Use Markdown when useful."
   });
 
-  const stream = await gemini.models.generateContentStream({
-    model: geminiModel,
-    contents: parts
-  });
+  const stream = await createGeminiStream(parts);
 
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -162,17 +219,25 @@ app.post("/api/chat", async (req, res) => {
 
     const safeAttachments = Array.isArray(attachments) ? attachments.slice(0, 5) : [];
     const hasAttachments = safeAttachments.length > 0;
+    const effectiveModel =
+      requestedModel === "auto" || !requestedModel
+        ? chooseModel({ messages, attachments: safeAttachments })
+        : requestedModel;
 
     if (hasAttachments && !process.env.GEMINI_API_KEY) {
       return res.status(503).json({ error: "Gemini is not configured yet. Add GEMINI_API_KEY in Render." });
     }
 
-    if (!hasAttachments && !process.env.GROQ_API_KEY) {
+    if (effectiveModel === model && !process.env.GROQ_API_KEY) {
       return res.status(503).json({ error: "The server API key has not been configured yet." });
     }
 
-    if (requestedModel && ![model, geminiModel].includes(requestedModel)) {
-      return res.status(400).json({ error: "That model is not available on the current configuration." });
+    if (effectiveModel === geminiModel && !process.env.GEMINI_API_KEY) {
+      if (requestedModel === "auto" || !requestedModel) {
+        console.warn("Auto routing selected Gemini, but Gemini is unavailable. Falling back to GPT-OSS 20B.");
+      } else {
+        return res.status(503).json({ error: "Gemini is not configured yet. Add GEMINI_API_KEY in Render." });
+      }
     }
 
     const safeMessages = messages
@@ -187,14 +252,20 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "No valid messages were provided." });
     }
 
-    if (hasAttachments || requestedModel === geminiModel) {
-      if (!safeMessages.length) {
-        return res.status(400).json({ error: "No valid messages were provided." });
-      }
+    const autoMode = requestedModel === "auto" || !requestedModel;
+    const useGemini = effectiveModel === geminiModel && Boolean(process.env.GEMINI_API_KEY);
+
+    if (useGemini) {
       return await streamGemini({
         messages: safeMessages,
         attachments: safeAttachments,
         res
+      });
+    }
+
+    if (hasAttachments) {
+      return res.status(503).json({
+        error: "This request includes an attachment, so ProjectSyntra needs Gemini for multimodal processing."
       });
     }
 
