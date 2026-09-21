@@ -36,6 +36,7 @@ let selectedModel = "openai/gpt-oss-20b";
 let supabaseClient = null;
 let authEnabled = false;
 let currentUser = null;
+let busy = false;
 
 const uid = () => crypto.randomUUID?.() || Date.now() + "-" + Math.random();
 const key = () => `projectsyntra-chats:${currentUser?.id || "guest"}`;
@@ -110,12 +111,53 @@ function persist() {
   renderHistory();
 }
 
+function deleteChat(id) {
+  const index = chats.findIndex(c => c.id === id);
+  if (index < 0) return;
+  const title = chats[index].title || "this chat";
+  if (!confirm("Delete " + title + "?")) return;
+  chats.splice(index, 1);
+  if (activeChatId === id) {
+    activeChatId = null;
+    conversation = [];
+    if (chats.length) {
+      activeChatId = chats[0].id;
+      conversation = [...chats[0].messages];
+    } else {
+      newChat();
+      return;
+    }
+  }
+  save();
+  renderHistory();
+  render();
+}
+
+function renameChat(id) {
+  const chat = chats.find(c => c.id === id);
+  if (!chat) return;
+  const title = prompt("Rename chat", chat.title || "New chat");
+  if (title === null) return;
+  const trimmed = title.trim();
+  if (!trimmed) return;
+  chat.title = trimmed.slice(0, 80);
+  save();
+  renderHistory();
+}
+
 function renderHistory() {
   chatCount.textContent = chats.length;
   historyEl.innerHTML = chats.map(c =>
-    `<button class="history-item ${c.id === activeChatId ? "active" : ""}" data-chat-id="${c.id}" type="button">
-      <span>${esc(c.title)}</span><small>${c.messages.length} message${c.messages.length === 1 ? "" : "s"}</small>
-    </button>`
+    '<div class="history-item-wrap ' + (c.id === activeChatId ? "active" : "") + '">' +
+      '<button class="history-item" data-chat-id="' + c.id + '" type="button">' +
+        '<span>' + esc(c.title) + '</span>' +
+        '<small>' + c.messages.length + " message" + (c.messages.length === 1 ? "" : "s") + '</small>' +
+      '</button>' +
+      '<div class="history-actions">' +
+        '<button type="button" data-rename-chat="' + c.id + '" aria-label="Rename chat" title="Rename chat">✎</button>' +
+        '<button type="button" data-delete-chat="' + c.id + '" aria-label="Delete chat" title="Delete chat">×</button>' +
+      '</div>' +
+    '</div>'
   ).join("");
 }
 
@@ -138,20 +180,39 @@ function render() {
     messagesEl.innerHTML = welcome();
     return;
   }
-  conversation.forEach(m => addMessage(m.role, m.content));
+  conversation.forEach((m, index) => addMessage(m.role, m.content, false, index));
 }
 
-function addMessage(role, content, typing = false) {
+function addMessage(role, content, typing = false, index = -1) {
   document.querySelector(".welcome")?.remove();
   const row = document.createElement("div");
   row.className = "message " + role;
+  if (index >= 0) row.dataset.messageIndex = index;
+
   const avatar = document.createElement("div");
   avatar.className = "avatar";
   avatar.textContent = role === "user" ? "You" : "S";
+
+  const contentWrap = document.createElement("div");
+  contentWrap.className = "message-content";
+
   const bubble = document.createElement("div");
   bubble.className = "bubble" + (typing ? " typing" : "");
   bubble.innerHTML = role === "assistant" ? md(content) : esc(content).replace(/\n/g, "<br>");
-  row.append(avatar, bubble);
+  contentWrap.appendChild(bubble);
+
+  if (!typing && index >= 0 && (role === "user" || role === "assistant")) {
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+    if (role === "user") {
+      actions.innerHTML = '<button type="button" data-edit-message="' + index + '">Edit</button><button type="button" data-retry-message="' + index + '">Retry</button>';
+    } else {
+      actions.innerHTML = '<button type="button" data-retry-message="' + index + '">↻ Retry</button>';
+    }
+    contentWrap.appendChild(actions);
+  }
+
+  row.append(avatar, contentWrap);
   messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return bubble;
@@ -218,94 +279,131 @@ function buildUserContent(text) {
   return text + fileText;
 }
 
+function setBusy(value) {
+  busy = value;
+  send.disabled = value;
+  input.disabled = value;
+  attachButton.disabled = value;
+}
+
+async function requestAnswer() {
+  const t = await token();
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: Object.assign({ "Content-Type": "application/json" }, t ? { Authorization: "Bearer " + t } : {}),
+    body: JSON.stringify({
+      model: selectedModel,
+      messages: [{ role: "system", content: personality() }, ...conversation]
+    })
+  });
+
+  if (!response.ok) {
+    let data = {};
+    try { data = await response.json(); } catch {}
+    throw Error(data.error || "Request failed (" + response.status + ").");
+  }
+
+  let answer = "";
+  const bubble = addMessage("assistant", "Thinking…", true);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop();
+
+    for (const part of parts) {
+      const line = part.split("\n").find(v => v.startsWith("data: "));
+      if (!line) continue;
+      const event = JSON.parse(line.slice(6));
+
+      if (event.type === "delta") {
+        answer += event.text;
+        bubble.classList.remove("typing");
+        bubble.innerHTML = md(answer);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      if (event.type === "error") throw Error(event.error);
+    }
+  }
+
+  if (!answer) answer = "The model returned an empty response.";
+  conversation.push({ role: "assistant", content: answer });
+  persist();
+}
+
 async function sendMessage(text) {
   if (!active()) newChat();
 
   const userContent = buildUserContent(text);
   conversation.push({ role: "user", content: userContent });
   persist();
-  addMessage("user", userContent);
+  addMessage("user", userContent, false, conversation.length - 1);
 
   const sentFiles = pendingFiles;
   pendingFiles = [];
   renderAttachments();
-
-  const bubble = addMessage("assistant", "Thinking…", true);
-  send.disabled = true;
-  input.disabled = true;
-  attachButton.disabled = true;
-
-  let answer = "";
+  setBusy(true);
 
   try {
-    const t = await token();
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: Object.assign(
-        { "Content-Type": "application/json" },
-        t ? { Authorization: "Bearer " + t } : {}
-      ),
-      body: JSON.stringify({
-        model: selectedModel,
-        messages: [
-          { role: "system", content: personality() },
-          ...conversation
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      let data = {};
-      try { data = await response.json(); } catch {}
-      throw Error(data.error || "Request failed (" + response.status + ").");
-    }
-
-    bubble.textContent = "";
-    bubble.classList.remove("typing");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-
-      buffer += decoder.decode(chunk.value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop();
-
-      for (const part of parts) {
-        const line = part.split("\n").find(v => v.startsWith("data: "));
-        if (!line) continue;
-        const event = JSON.parse(line.slice(6));
-
-        if (event.type === "delta") {
-          answer += event.text;
-          bubble.innerHTML = md(answer);
-          messagesEl.scrollTop = messagesEl.scrollHeight;
-        }
-
-        if (event.type === "error") throw Error(event.error);
-      }
-    }
-
-    if (!answer) answer = "The model returned an empty response.";
-    conversation.push({ role: "assistant", content: answer });
-    persist();
+    await requestAnswer();
   } catch (error) {
-    bubble.classList.remove("typing");
-    bubble.innerHTML = '<span class="error-text">' + esc(error.message) + "</span>";
-    conversation.pop();
-    persist();
+    addMessage("assistant", error.message, false, -1);
     pendingFiles = sentFiles;
     renderAttachments();
   } finally {
-    send.disabled = false;
-    input.disabled = false;
-    attachButton.disabled = false;
+    setBusy(false);
     input.focus();
   }
+}
+
+async function retryMessage(index) {
+  if (busy) return;
+  const message = conversation[index];
+  if (!message) return;
+
+  let userIndex = index;
+  if (message.role === "assistant") userIndex = index - 1;
+  if (!conversation[userIndex] || conversation[userIndex].role !== "user") return;
+
+  conversation = conversation.slice(0, userIndex + 1);
+  persist();
+  render();
+
+  setBusy(true);
+  try {
+    await requestAnswer();
+  } catch (error) {
+    addMessage("assistant", error.message, false, -1);
+  } finally {
+    setBusy(false);
+    input.focus();
+  }
+}
+
+function editMessage(index) {
+  if (busy) return;
+  const message = conversation[index];
+  if (!message || message.role !== "user") return;
+
+  const edited = prompt("Edit your prompt", message.content);
+  if (edited === null) return;
+
+  const trimmed = edited.trim();
+  if (!trimmed) return;
+
+  conversation = conversation.slice(0, index);
+  pendingFiles = [];
+  persist();
+  render();
+  input.value = trimmed;
+  input.style.height = "auto";
+  sendMessage(trimmed);
 }
 
 function open(modal) { modal.classList.remove("hidden"); }
@@ -384,7 +482,11 @@ async function auth() {
   authSubmit.disabled = true;
 
   const result = authMode === "signup"
-    ? await supabaseClient.auth.signUp({ email, password })
+    ? await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: window.location.origin }
+      })
     : await supabaseClient.auth.signInWithPassword({ email, password });
 
   authSubmit.disabled = false;
@@ -450,6 +552,18 @@ $("#newChat").addEventListener("click", newChat);
 $("#clearChat").addEventListener("click", newChat);
 
 historyEl.addEventListener("click", event => {
+  const rename = event.target.closest("[data-rename-chat]");
+  if (rename) {
+    renameChat(rename.dataset.renameChat);
+    return;
+  }
+
+  const del = event.target.closest("[data-delete-chat]");
+  if (del) {
+    deleteChat(del.dataset.deleteChat);
+    return;
+  }
+
   const item = event.target.closest("[data-chat-id]");
   if (!item) return;
   const chat = chats.find(c => c.id === item.dataset.chatId);
@@ -459,6 +573,17 @@ historyEl.addEventListener("click", event => {
   renderHistory();
   render();
   closeSidebar();
+});
+
+messagesEl.addEventListener("click", event => {
+  const edit = event.target.closest("[data-edit-message]");
+  if (edit) {
+    editMessage(Number(edit.dataset.editMessage));
+    return;
+  }
+
+  const retry = event.target.closest("[data-retry-message]");
+  if (retry) retryMessage(Number(retry.dataset.retryMessage));
 });
 
 document.addEventListener("click", event => {
