@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import OpenAI from "openai";
 import { GoogleGenAI } from "@google/genai";
+import { InferenceClient } from "@huggingface/inference";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
@@ -12,8 +13,8 @@ const app = express();
 const port = Number(process.env.PORT) || 10000;
 const model = "openai/gpt-oss-20b";
 const geminiModel = "gemini-3.6-flash";
-const pollinationsImageModel = "black-forest-labs/flux.1-schnell";
-const pollinationsVideoModel = "alibaba/wan-2.2-fast";
+const hfImageModel = "black-forest-labs/FLUX.1-schnell";
+const hfVideoModel = "Lightricks/LTX-Video-0.9.8-13B-distilled";
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabasePublishableKey =
@@ -22,10 +23,11 @@ const authEnabled = Boolean(supabaseUrl && supabasePublishableKey);
 
 if (!process.env.GROQ_API_KEY) console.warn("GROQ_API_KEY is not set.");
 if (!process.env.GEMINI_API_KEY) console.warn("GEMINI_API_KEY is not set. Image/file understanding will be unavailable.");
-if (!process.env.POLLINATIONS_API_KEY) console.warn("POLLINATIONS_API_KEY is not set. Image/video generation will be unavailable.");
+if (!process.env.HF_TOKEN) console.warn("HF_TOKEN is not set. Image/video generation will be unavailable.");
 if (!authEnabled) console.warn("Supabase auth is disabled.");
 
 const gemini = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+const hf = process.env.HF_TOKEN ? new InferenceClient(process.env.HF_TOKEN) : null;
 
 const client = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1",
@@ -61,9 +63,9 @@ app.get("/api/config", (_req, res) =>
       { id: "auto", name: "Auto", free: true, description: "Chooses the best available model for each request" },
       { id: model, name: "GPT-OSS 20B", free: true },
       { id: geminiModel, name: "Gemini 3.6 Flash", free: true, multimodal: true },
-      ...(process.env.POLLINATIONS_API_KEY ? [
-        { id: "pollinations-image", name: "Pollinations Image", free: true, imageGeneration: true },
-        { id: "pollinations-video", name: "Pollinations Video", free: true, videoGeneration: true }
+      ...(process.env.HF_TOKEN ? [
+        { id: "hf-image", name: "FLUX.1 Schnell", free: true, imageGeneration: true },
+        { id: "hf-video", name: "LTX-Video", free: true, videoGeneration: true }
       ] : [])
     ]
   })
@@ -75,7 +77,7 @@ app.get("/api/health", (_req, res) =>
     model,
     configured: Boolean(process.env.GROQ_API_KEY),
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
-    pollinationsConfigured: Boolean(process.env.POLLINATIONS_API_KEY),
+    huggingFaceConfigured: Boolean(process.env.HF_TOKEN),
     authEnabled
   })
 );
@@ -120,8 +122,8 @@ function isVideoGenerationPrompt(prompt) {
 function chooseModel({ messages, attachments }) {
   const prompt = latestUserPrompt(messages);
 
-  if (isVideoGenerationPrompt(prompt)) return "pollinations-video";
-  if (isImageGenerationPrompt(prompt)) return "pollinations-image";
+  if (isVideoGenerationPrompt(prompt)) return "hf-video";
+  if (isImageGenerationPrompt(prompt)) return "hf-image";
   if (attachments.length) return geminiModel;
 
   const lower = prompt.toLowerCase();
@@ -227,53 +229,33 @@ async function streamGemini({ messages, attachments, res }) {
   res.end();
 }
 
-async function generatePollinationsMedia({ kind, prompt, res }) {
-  const apiKey = process.env.POLLINATIONS_API_KEY;
-  if (!apiKey) {
+async function generateHuggingFaceMedia({ kind, prompt, res }) {
+  if (!hf) {
     throw Object.assign(
-      new Error("Pollinations is not configured yet. Add POLLINATIONS_API_KEY in Render."),
+      new Error("Hugging Face is not configured yet. Add HF_TOKEN in Render."),
       { status: 503 }
     );
   }
 
-  const modelId = kind === "video" ? pollinationsVideoModel : pollinationsImageModel;
-  const endpoint = kind === "video" ? "video" : "image";
-  const params = new URLSearchParams({ model: modelId });
+  const isVideo = kind === "video";
+  const modelId = isVideo ? hfVideoModel : hfImageModel;
 
-  if (kind === "video") {
-    params.set("duration", "5");
-    params.set("aspectRatio", /\b(vertical|portrait|phone|tiktok|reels|9:16)\b/i.test(prompt) ? "9:16" : "16:9");
+  let blob;
+  if (isVideo) {
+    blob = await hf.textToVideo({
+      model: modelId,
+      inputs: prompt.slice(0, 12000)
+    });
   } else {
-    params.set("width", "1024");
-    params.set("height", "1024");
+    blob = await hf.textToImage({
+      model: modelId,
+      inputs: prompt.slice(0, 12000)
+    });
   }
 
-  const url = "https://gen.pollinations.ai/" + endpoint + "/" + encodeURIComponent(prompt.slice(0, 12000)) + "?" + params.toString();
-
-  const response = await fetch(url, {
-    headers: { Authorization: "Bearer " + apiKey }
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    const error = new Error(
-      "Pollinations " + kind + " generation failed (" + response.status + ")." +
-      (detail ? " " + detail.slice(0, 500) : "")
-    );
-    error.status = response.status === 402 ? 402 : 502;
-    throw error;
-  }
-
-  const linkHeader = response.headers.get("link") || "";
-  const match = linkHeader.match(/<([^>]+)>;?\s*rel="?enclosure"?/i) || linkHeader.match(/<([^>]+)>/);
-  const mediaUrl = match?.[1] || "";
-
-  if (!mediaUrl) {
-    throw Object.assign(
-      new Error("Pollinations generated the media, but did not return a public media URL."),
-      { status: 502 }
-    );
-  }
+  const buffer = Buffer.from(await blob.arrayBuffer());
+  const mimeType = blob.type || (isVideo ? "video/mp4" : "image/png");
+  const data = buffer.toString("base64");
 
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -284,14 +266,15 @@ async function generatePollinationsMedia({ kind, prompt, res }) {
 
   res.write("data: " + JSON.stringify({
     type: "media",
-    mediaType: kind,
-    url: mediaUrl,
+    mediaType: isVideo ? "video" : "image",
+    mimeType,
+    data,
     model: modelId
   }) + "\n\n");
 
   res.write("data: " + JSON.stringify({
     type: "done",
-    model: kind === "video" ? "pollinations-video" : "pollinations-image"
+    model: isVideo ? "hf-video" : "hf-image"
   }) + "\n\n");
   res.end();
 }
@@ -314,8 +297,8 @@ app.post("/api/chat", async (req, res) => {
         ? chooseModel({ messages, attachments: safeAttachments })
         : requestedModel;
 
-    if ((effectiveModel === "pollinations-image" || effectiveModel === "pollinations-video") && !process.env.POLLINATIONS_API_KEY) {
-      return res.status(503).json({ error: "Image/video generation is not configured yet. Add POLLINATIONS_API_KEY in Render." });
+    if ((effectiveModel === "hf-image" || effectiveModel === "hf-video") && !process.env.HF_TOKEN) {
+      return res.status(503).json({ error: "Image/video generation is not configured yet. Add HF_TOKEN in Render." });
     }
 
     if (hasAttachments && !process.env.GEMINI_API_KEY) {
@@ -326,7 +309,7 @@ app.post("/api/chat", async (req, res) => {
       return res.status(503).json({ error: "The server API key has not been configured yet." });
     }
 
-    if (![model, geminiModel, "auto", "pollinations-image", "pollinations-video"].includes(effectiveModel)) {
+    if (![model, geminiModel, "auto", "hf-image", "hf-video"].includes(effectiveModel)) {
       return res.status(400).json({ error: "That model is not available on the current configuration." });
     }
 
@@ -352,12 +335,12 @@ app.post("/api/chat", async (req, res) => {
 
     const autoMode = requestedModel === "auto" || !requestedModel;
     const useGemini = effectiveModel === geminiModel && Boolean(process.env.GEMINI_API_KEY);
-    const usePollinationsImage = effectiveModel === "pollinations-image";
-    const usePollinationsVideo = effectiveModel === "pollinations-video";
+    const useHFImage = effectiveModel === "hf-image";
+    const useHFVideo = effectiveModel === "hf-video";
 
-    if (usePollinationsImage || usePollinationsVideo) {
-      return await generatePollinationsMedia({
-        kind: usePollinationsVideo ? "video" : "image",
+    if (useHFImage || useHFVideo) {
+      return await generateHuggingFaceMedia({
+        kind: useHFVideo ? "video" : "image",
         prompt: latestUserPrompt(safeMessages),
         res
       });
