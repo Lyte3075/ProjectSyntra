@@ -1,24 +1,64 @@
 # ProjectSyntra 🤖
 
-A responsive AI chat website powered by **Union Alpha** through TokenRa's OpenAI-compatible API.
+**ProjectSyntra** is a responsive AI chat website powered by **Groq**, with optional **Supabase authentication** and a modern chat interface for web, mobile, tablet, and desktop.
 
-## What it includes
+🌐 **Live website:** https://projectsyntra.onrender.com/
 
-- 📱 Responsive phone, tablet, and desktop UI
-- 🌐 Full-stack Express site, ready for public hosting
-- 🔐 API key stays server-side
-- 💬 Conversation history during the current browser session
-- 📲 Mobile Safari / Android-friendly viewport and safe-area handling
-- 🧩 Installable web-app metadata
-- ❤️ Health endpoint at `/api/health`
-- 🚀 GitHub-friendly deployment
+## ✨ Features
 
-## Local setup
+- 💬 AI chat powered by Groq
+- ⚡ Streaming AI responses
+- 📝 Markdown rendering
+- 💻 Formatted code blocks
+- 🔄 Retry AI responses
+- ✏️ Edit previously sent prompts
+- 🗂️ Multiple chat histories
+- ✏️ Rename chats
+- 🗑️ Delete chats
+- 🧠 Custom AI personality
+- 🤖 Model selector
+- 📎 Text/source-file attachments
+- 🔐 Account sign-up and sign-in with Supabase
+- 📱 Responsive mobile, tablet, and desktop UI
+- 🌓 Dark, modern interface
+- 🚀 Render-ready Express backend
+- 🔒 AI API key stays server-side
+
+## 🌐 Live Demo
+
+Visit ProjectSyntra here:
+
+**https://projectsyntra.onrender.com/**
+
+## 🧰 Tech Stack
+
+- **Frontend:** HTML, CSS, JavaScript
+- **Backend:** Node.js + Express
+- **AI:** Groq API
+- **Authentication:** Supabase Auth
+- **Hosting:** Render
+- **Repository:** GitHub
+
+## 📁 Project Structure
+
+```text
+ProjectSyntra/
+├── public/
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+├── server.js
+├── package.json
+└── README.md
+```
+
+## 🚀 Local Setup
 
 ### Requirements
 
 - Node.js 20+
-- A TokenRa API key with access to `union-alpha`
+- A Groq API key
+- A Supabase project if you want account authentication
 
 ### Install
 
@@ -26,16 +66,18 @@ A responsive AI chat website powered by **Union Alpha** through TokenRa's OpenAI
 npm install
 ```
 
-### Configure the API key
+### Configure environment variables
 
-Copy `.env.example` to `.env` and add your replacement API key:
+Create a `.env` file:
 
 ```env
-TOKENRA_API_KEY=your_key_here
+GROQ_API_KEY=your_groq_key_here
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
 PORT=3000
 ```
 
-**Never commit `.env`.**
+**Never commit `.env` or expose your API key in client-side code.**
 
 ### Run
 
@@ -43,7 +85,11 @@ PORT=3000
 npm start
 ```
 
-Open `http://localhost:3000`.
+Then open:
+
+```text
+http://localhost:3000
+```
 
 For development:
 
@@ -51,54 +97,100 @@ For development:
 npm run dev
 ```
 
-## API configuration
+## 🤖 AI Configuration
 
-The server uses:
+ProjectSyntra currently uses:
 
-- Base URL: `https://tokenra.io/v1`
-- Model: `union-alpha`
-- Endpoint: `/chat/completions`
+- **Provider:** Groq
+- **Model:** `openai/gpt-oss-20b`
+- **API compatibility:** OpenAI-compatible chat completions
+- **Streaming:** Enabled
 
-The API key is never sent to the browser.
+The Groq API key is used only by the server and is never intentionally sent to the browser.
 
-## Deploying to Render
+## 🔐 Authentication
 
-Render can deploy an Express Node app as a Web Service and automatically redeploy it when the connected Git branch changes.
+ProjectSyntra can use Supabase Auth for account creation and sign-in.
 
-Use:
+The frontend receives only the Supabase **publishable key**. The AI provider key remains server-side.
+
+For production authentication, configure the Supabase URL configuration with your live ProjectSyntra URL:
+
+```text
+https://projectsyntra.onrender.com/
+```
+
+Email confirmation redirects should also be configured to use the live site.
+
+## 💬 Chat Features
+
+### Chat history
+
+ProjectSyntra supports multiple conversations. Chats can be:
+
+- Created
+- Selected
+- Renamed
+- Deleted
+
+### Prompt editing
+
+Previously sent user prompts can be edited. Editing a prompt rebuilds the conversation from that point and sends the updated prompt to the AI.
+
+### Retry
+
+AI responses can be regenerated with the **Retry** button. You can also retry from an earlier point in a conversation.
+
+### File attachments
+
+Text and source files can be attached to a prompt. The current implementation reads supported text files in the browser and includes their contents in the request.
+
+## ☁️ Production Deployment
+
+ProjectSyntra is deployed as an Express Web Service on Render.
+
+Typical Render configuration:
 
 - **Runtime:** Node
 - **Build Command:** `npm install`
 - **Start Command:** `npm start`
 - **Branch:** `main`
-- **Environment Variable:** `TOKENRA_API_KEY` = your replacement API key
 
-After deployment, Render gives the service a public `onrender.com` URL.
+Required production environment variables:
 
-## Deploying to Vercel
+- `GROQ_API_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
 
-Vercel supports Express deployment from a Git repository with zero configuration. Import this repository, then add:
+Render automatically redeploys when changes are pushed to the connected GitHub branch.
 
-`TOKENRA_API_KEY` = your replacement API key
+## 🔒 Security
 
-Vercel can then deploy the Express app and serve the `public/` assets from the same project.
-
-## Security
-
-The API key previously pasted into chat should be considered exposed. Revoke it and use a newly generated key before deployment.
-
-Never place the TokenRa key in:
+Never put secrets in:
 
 - `public/app.js`
 - `public/index.html`
-- client-side JavaScript
+- `public/style.css`
 - GitHub commits
-- screenshots or public posts
+- Screenshots
+- Public posts
 
-Set it only as a server-side environment variable.
+Use server-side environment variables for secret credentials.
 
-## Important production note
+If an API key is accidentally exposed, revoke it and generate a replacement.
 
-This starter does not include accounts, a database, per-user quotas, moderation, or persistent cloud chat history. Conversation history is kept in the browser session only.
+## 📌 Current Storage Note
 
-Union Alpha is a third-party model served through TokenRa. Check the provider's current terms, limits, retention policy, and availability before using sensitive or production data.
+Chat histories are currently stored in the browser's local storage and separated by the active account/guest workspace.
+
+This means the current chat history is **not yet synchronized between different devices**.
+
+A future database-backed chat history system can move conversations into Supabase so authenticated users can access the same chats across devices.
+
+## 🛠️ Project Status
+
+ProjectSyntra is an actively developed project. Features and architecture may change as the project grows.
+
+---
+
+**ProjectSyntra** • Build. Chat. Create. 🚀
