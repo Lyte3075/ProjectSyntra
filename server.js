@@ -240,29 +240,49 @@ async function generateHuggingFaceMedia({ kind, prompt, res }) {
   const isVideo = kind === "video";
   const modelId = isVideo ? hfVideoModel : hfImageModel;
 
-  let blob;
-  if (isVideo) {
-    blob = await hf.textToVideo({
-      model: modelId,
-      inputs: prompt.slice(0, 12000)
-    });
-  } else {
-    blob = await hf.textToImage({
-      model: modelId,
-      inputs: prompt.slice(0, 12000)
-    });
-  }
-
-  const buffer = Buffer.from(await blob.arrayBuffer());
-  const mimeType = blob.type || (isVideo ? "video/mp4" : "image/png");
-  const data = buffer.toString("base64");
-
+  // Open the SSE connection before the long-running generation request so
+  // Render/browser clients do not sit on a silent connection while HF works.
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
+
+  res.write("data: " + JSON.stringify({
+    type: "status",
+    status: isVideo ? "Generating video…" : "Generating image…",
+    model: modelId
+  }) + "\n\n");
+
+  // Hugging Face recommends the LTX distilled model for fast text-to-video.
+  // Keep the generation deliberately small enough for hosted inference.
+  const args = isVideo
+    ? {
+        model: modelId,
+        inputs: prompt.slice(0, 12000),
+        parameters: {
+          num_frames: 121,
+          num_inference_steps: 8
+        }
+      }
+    : {
+        model: modelId,
+        inputs: prompt.slice(0, 12000)
+      };
+
+  let blob;
+  if (isVideo) {
+    blob = await hf.textToVideo(args);
+  } else {
+    blob = await hf.textToImage(args);
+  }
+
+  const buffer = Buffer.from(
+    blob instanceof Blob ? await blob.arrayBuffer() : blob
+  );
+  const mimeType = blob?.type || (isVideo ? "video/mp4" : "image/png");
+  const data = buffer.toString("base64");
 
   res.write("data: " + JSON.stringify({
     type: "media",
