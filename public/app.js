@@ -394,21 +394,45 @@ function buildUserContent(text) {
 function setBusy(value) {
   busy = value;
   send.disabled = value;
-  input.disabled = value;
-  attachButton.disabled = value;
+  send.setAttribute("aria-busy", value ? "true" : "false");
+  input.disabled = false;
+  attachButton.disabled = false;
 }
 
 async function requestAnswer() {
   const t = await token();
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: Object.assign({ "Content-Type": "application/json" }, t ? { Authorization: "Bearer " + t } : {}),
-    body: JSON.stringify({
-      model: selectedModel,
-      messages: [{ role: "system", content: personality() }, ...conversation],
-      attachments: pendingFiles.filter(f => f.multimodal && f.data).map(f => ({ name: f.name, mimeType: f.type, data: f.data }))
-    })
-  });
+  if (authEnabled && !t) {
+    throw Error("Please sign in to ProjectSyntra before sending messages.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+
+  let response;
+  try {
+    response = await fetch("/api/chat", {
+      method: "POST",
+      headers: Object.assign(
+        { "Content-Type": "application/json" },
+        t ? { Authorization: "Bearer " + t } : {}
+      ),
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [{ role: "system", content: personality() }, ...conversation],
+        attachments: pendingFiles
+          .filter(f => f.multimodal && f.data)
+          .map(f => ({ name: f.name, mimeType: f.type, data: f.data }))
+      }),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw Error("The request took too long. The server may be waking up. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     let data = {};
@@ -418,6 +442,7 @@ async function requestAnswer() {
 
   let answer = "";
   const bubble = addMessage("assistant", "Thinking…", true);
+  if (!response.body) throw Error("The server returned no response stream.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -466,7 +491,9 @@ async function sendMessage(text) {
   try {
     await requestAnswer();
   } catch (error) {
-    addMessage("assistant", error.message, false, -1);
+    const message = error?.message || "Something went wrong.";
+    const bubble = addMessage("assistant", message, false, -1);
+    bubble.classList.add("error-text");
     pendingFiles = sentFiles;
     renderAttachments();
   } finally {
@@ -492,7 +519,8 @@ async function retryMessage(index) {
   try {
     await requestAnswer();
   } catch (error) {
-    addMessage("assistant", error.message, false, -1);
+    const bubble = addMessage("assistant", error?.message || "Something went wrong.", false, -1);
+    bubble.classList.add("error-text");
   } finally {
     setBusy(false);
     input.focus();
@@ -803,3 +831,20 @@ menuButton.addEventListener("click", () => {
 sidebarBackdrop.addEventListener("click", closeSidebar);
 
 setup();
+
+
+window.addEventListener("error", event => {
+  console.error("ProjectSyntra UI error:", event.error || event.message);
+});
+
+window.addEventListener("unhandledrejection", event => {
+  console.error("ProjectSyntra unhandled promise rejection:", event.reason);
+});
+
+setup().catch(error => {
+  console.error("ProjectSyntra setup failed:", error);
+  const message = error?.message || "ProjectSyntra could not finish loading.";
+  if (messagesEl) {
+    messagesEl.innerHTML = '<div class="message assistant"><div class="avatar">S</div><div class="message-content"><div class="bubble error-text">' + esc(message) + '</div></div></div>';
+  }
+});
