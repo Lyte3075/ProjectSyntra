@@ -1,56 +1,49 @@
-# Union Alpha Chat 🤖
+# ProjectSyntra 🤖
 
-A standalone GitHub-ready chatbot using **Union Alpha** through TokenRa's OpenAI-compatible API.
+A responsive AI chat website powered by **Union Alpha** through TokenRa's OpenAI-compatible API.
 
-## Features
+## What it includes
 
-- Clean responsive chat UI
-- Conversation history during the current session
-- New chat / clear chat controls
-- API key stays on the server
-- Node.js + Express backend
-- OpenAI-compatible Union Alpha API
-- No frontend framework required
+- 📱 Responsive phone, tablet, and desktop UI
+- 🌐 Full-stack Express site, ready for public hosting
+- 🔐 API key stays server-side
+- 💬 Conversation history during the current browser session
+- 📲 Mobile Safari / Android-friendly viewport and safe-area handling
+- 🧩 Installable web-app metadata
+- ❤️ Health endpoint at `/api/health`
+- 🚀 GitHub-friendly deployment
 
-## 1. Requirements
+## Local setup
 
-- Node.js 18+
+### Requirements
+
+- Node.js 20+
 - A TokenRa API key with access to `union-alpha`
 
-## 2. Install
+### Install
 
 ```bash
 npm install
 ```
 
-## 3. Add your API key
+### Configure the API key
 
-Copy `.env.example` to `.env`:
-
-```bash
-cp .env.example .env
-```
-
-Then put your **new** API key in `.env`:
+Copy `.env.example` to `.env` and add your replacement API key:
 
 ```env
 TOKENRA_API_KEY=your_key_here
 PORT=3000
 ```
 
-Never commit `.env`.
+**Never commit `.env`.**
 
-## 4. Run
+### Run
 
 ```bash
 npm start
 ```
 
-Open:
-
-```text
-http://localhost:3000
-```
+Open `http://localhost:3000`.
 
 For development:
 
@@ -66,14 +59,46 @@ The server uses:
 - Model: `union-alpha`
 - Endpoint: `/chat/completions`
 
-The API key is intentionally never sent to the browser.
+The API key is never sent to the browser.
 
-## Deploying
+## Deploying to Render
 
-This project can be deployed to a Node-compatible host. Set `TOKENRA_API_KEY` as a server-side environment variable in the host's dashboard rather than committing `.env`.
+Render can deploy an Express Node app as a Web Service and automatically redeploy it when the connected Git branch changes.
 
-## Security note
+Use:
 
-The API key previously pasted into chat should be considered exposed. Revoke it and create a replacement before using this project.
+- **Runtime:** Node
+- **Build Command:** `npm install`
+- **Start Command:** `npm start`
+- **Branch:** `main`
+- **Environment Variable:** `TOKENRA_API_KEY` = your replacement API key
 
-Union Alpha is a third-party model served through TokenRa. Check the provider's current terms, limits, retention policy, and availability before using it for sensitive or production data.
+After deployment, Render gives the service a public `onrender.com` URL.
+
+## Deploying to Vercel
+
+Vercel supports Express deployment from a Git repository with zero configuration. Import this repository, then add:
+
+`TOKENRA_API_KEY` = your replacement API key
+
+Vercel can then deploy the Express app and serve the `public/` assets from the same project.
+
+## Security
+
+The API key previously pasted into chat should be considered exposed. Revoke it and use a newly generated key before deployment.
+
+Never place the TokenRa key in:
+
+- `public/app.js`
+- `public/index.html`
+- client-side JavaScript
+- GitHub commits
+- screenshots or public posts
+
+Set it only as a server-side environment variable.
+
+## Important production note
+
+This starter does not include accounts, a database, per-user quotas, moderation, or persistent cloud chat history. Conversation history is kept in the browser session only.
+
+Union Alpha is a third-party model served through TokenRa. Check the provider's current terms, limits, retention policy, and availability before using sensitive or production data.
