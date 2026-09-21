@@ -37,6 +37,8 @@ let supabaseClient = null;
 let authEnabled = false;
 let currentUser = null;
 let busy = false;
+let cloudSyncReady = false;
+let syncingCloud = false;
 
 const uid = () => crypto.randomUUID?.() || Date.now() + "-" + Math.random();
 const key = () => `projectsyntra-chats:${currentUser?.id || "guest"}`;
@@ -73,6 +75,14 @@ function save() {
   } catch {}
 }
 
+function normalizeChat(chat) {
+  return {
+    ...chat,
+    updatedAt: Number(chat.updatedAt) || Date.now(),
+    messages: Array.isArray(chat.messages) ? chat.messages : []
+  };
+}
+
 function load() {
   try {
     chats = JSON.parse(localStorage.getItem(key()) || "[]");
@@ -80,6 +90,90 @@ function load() {
     chats = [];
   }
   if (!Array.isArray(chats)) chats = [];
+  chats = chats.map(normalizeChat);
+}
+
+async function cloudUpsert(chat) {
+  if (!cloudSyncReady || !supabaseClient || !currentUser || !chat) return;
+  const { error } = await supabaseClient.from("chat_sessions").upsert({
+    id: chat.id,
+    user_id: currentUser.id,
+    title: chat.title || "New chat",
+    messages: chat.messages || [],
+    created_at: chat.createdAt
+      ? new Date(chat.createdAt).toISOString()
+      : new Date().toISOString(),
+    updated_at: new Date(chat.updatedAt || Date.now()).toISOString()
+  });
+  if (error) console.warn("Cloud chat sync failed:", error.message);
+}
+
+async function cloudDelete(id) {
+  if (!cloudSyncReady || !supabaseClient || !currentUser || !id) return;
+  const { error } = await supabaseClient
+    .from("chat_sessions")
+    .delete()
+    .eq("id", id);
+  if (error) console.warn("Cloud chat delete failed:", error.message);
+}
+
+async function syncFromCloud() {
+  if (!cloudSyncReady || !supabaseClient || !currentUser || syncingCloud) return;
+  syncingCloud = true;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from("chat_sessions")
+      .select("id,user_id,title,messages,created_at,updated_at")
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      console.warn("Cloud chat load failed:", error.message);
+      return;
+    }
+
+    const localById = new Map(chats.map(c => [c.id, normalizeChat(c)]));
+    const cloudRows = Array.isArray(data) ? data : [];
+    const cloudIds = new Set();
+
+    for (const row of cloudRows) {
+      cloudIds.add(row.id);
+      const local = localById.get(row.id);
+      const cloudUpdated = Date.parse(row.updated_at || row.created_at || "") || 0;
+      const localUpdated = local?.updatedAt || 0;
+
+      if (!local || cloudUpdated >= localUpdated) {
+        localById.set(row.id, normalizeChat({
+          id: row.id,
+          title: row.title || "New chat",
+          messages: Array.isArray(row.messages) ? row.messages : [],
+          createdAt: Date.parse(row.created_at || "") || Date.now(),
+          updatedAt: cloudUpdated || Date.now()
+        }));
+      }
+    }
+
+    chats = [...localById.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    save();
+
+    for (const chat of chats) {
+      if (!cloudIds.has(chat.id) || (localById.get(chat.id)?.updatedAt || 0) > 0) {
+        await cloudUpsert(chat);
+      }
+    }
+  } finally {
+    syncingCloud = false;
+  }
+}
+
+async function initializeCloudWorkspace() {
+  if (!currentUser || !supabaseClient) {
+    cloudSyncReady = false;
+    return;
+  }
+
+  cloudSyncReady = true;
+  await syncFromCloud();
 }
 
 function active() {
@@ -87,12 +181,19 @@ function active() {
 }
 
 function newChat() {
-  const c = { id: uid(), title: "New chat", messages: [] };
+  const c = {
+    id: uid(),
+    title: "New chat",
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
   chats.unshift(c);
   activeChatId = c.id;
   conversation = [];
   pendingFiles = [];
   save();
+  cloudUpsert(c);
   renderHistory();
   render();
   renderAttachments();
@@ -103,11 +204,13 @@ function persist() {
   const c = active();
   if (!c) return;
   c.messages = [...conversation];
+  c.updatedAt = Date.now();
   const first = conversation.find(m => m.role === "user");
   if (first && c.title === "New chat") {
     c.title = first.content.slice(0, 36) + (first.content.length > 36 ? "…" : "");
   }
   save();
+  cloudUpsert(c);
   renderHistory();
 }
 
@@ -117,6 +220,7 @@ function deleteChat(id) {
   const title = chats[index].title || "this chat";
   if (!confirm("Delete " + title + "?")) return;
   chats.splice(index, 1);
+  cloudDelete(id);
   if (activeChatId === id) {
     activeChatId = null;
     conversation = [];
@@ -141,7 +245,9 @@ function renameChat(id) {
   const trimmed = title.trim();
   if (!trimmed) return;
   chat.title = trimmed.slice(0, 80);
+  chat.updatedAt = Date.now();
   save();
+  cloudUpsert(chat);
   renderHistory();
 }
 
@@ -446,12 +552,22 @@ async function setup() {
     );
     currentUser = (await supabaseClient.auth.getUser()).data.user || null;
 
-    supabaseClient.auth.onAuthStateChange((_event, session) => {
+    supabaseClient.auth.onAuthStateChange(async (_event, session) => {
       currentUser = session?.user || null;
+      cloudSyncReady = false;
       load();
       if (!active()) newChat();
       else render();
       updateAuth();
+
+      await initializeCloudWorkspace();
+
+      if (!active()) newChat();
+      else {
+        conversation = [...active().messages];
+        renderHistory();
+        render();
+      }
     });
   }
 
@@ -463,6 +579,13 @@ async function setup() {
     render();
   }
   updateAuth();
+  await initializeCloudWorkspace();
+  if (!active()) newChat();
+  else {
+    conversation = [...active().messages];
+    renderHistory();
+    render();
+  }
 }
 
 async function auth() {
@@ -511,6 +634,13 @@ async function auth() {
     render();
   }
   updateAuth();
+  await initializeCloudWorkspace();
+  if (!active()) newChat();
+  else {
+    conversation = [...active().messages];
+    renderHistory();
+    render();
+  }
 }
 
 form.addEventListener("submit", event => {
@@ -620,6 +750,7 @@ authSubmit.addEventListener("click", auth);
 
 signOutButton.addEventListener("click", async () => {
   await supabaseClient?.auth.signOut();
+  cloudSyncReady = false;
   currentUser = null;
   close(authModal);
   updateAuth();
