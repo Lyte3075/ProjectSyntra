@@ -64,8 +64,8 @@ app.get("/api/config", (_req, res) =>
       { id: model, name: "GPT-OSS 20B", free: true },
       { id: geminiModel, name: "Gemini 3.6 Flash", free: true, multimodal: true },
       ...(process.env.HF_TOKEN ? [
-        { id: "hf-image", name: "FLUX.1 Schnell", free: true, imageGeneration: true },
-        { id: "hf-video", name: "LTX-Video", free: true, videoGeneration: true }
+        { id: "hf-image", name: "FLUX.1 Schnell", free: true, freeLabel: "Free credits", imageGeneration: true },
+        { id: "hf-video", name: "LTX-Video", free: true, freeLabel: "Free credits", videoGeneration: true }
       ] : [])
     ]
   })
@@ -410,5 +410,5 @@ app.get("*splat", (_req, res) =>
 );
 
 const server = app.listen(port, "0.0.0.0", () => console.log("ProjectSyntra running on port " + port));
-server.keepAliveTimeout = 120000;
-server.headersTimeout = 125000;
+server.keepAliveTimeout = 660000;
+server.headersTimeout = 665000;
