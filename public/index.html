@@ -1,24 +1,127 @@
 <!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#080a10"><meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="ProjectSyntra"><meta name="description" content="ProjectSyntra AI chat">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
-<title>ProjectSyntra</title><link rel="stylesheet" href="/style.css">
-</head><body>
-<div class="app-shell">
-<aside class="sidebar"><div class="brand"><div class="logo">S</div><div><strong>ProjectSyntra</strong><span>GPT-OSS 20B</span></div></div>
-<button id="newChat" class="new-chat" type="button">＋ New chat</button><div id="chatHistory" class="chat-history"></div>
-<div class="sidebar-card"><div class="status-dot"></div><div><strong>Server connected</strong><span>API key stays on the server.</span></div></div>
-<div class="sidebar-footer"><span>Model</span><code id="sidebarModel">GPT-OSS 20B</code></div></aside>
-<main class="chat"><header class="topbar"><div class="topbar-title"><div class="mobile-logo">S</div><div><h1>ProjectSyntra</h1><p id="modelLabel">GPT-OSS 20B</p></div></div>
-<div class="topbar-actions"><button id="modelSelect" class="toolbar-button" type="button">GPT-OSS 20B ▾</button><button id="personalityButton" class="icon-button" type="button">✦</button><button id="authButton" class="icon-button" type="button">👤</button><button id="clearChat" class="icon-button" type="button">⌫</button></div></header>
-<section id="messages" class="messages" aria-live="polite"><div class="welcome"><div class="welcome-icon">✦</div><h2>What are we building today?</h2><p>Streaming responses, Markdown, code blocks, chat history, accounts, and a customizable AI personality.</p><div class="suggestions"><button type="button">Explain quantum computing simply</button><button type="button">Help me build a JavaScript game</button><button type="button">Review this idea and find edge cases</button></div></div></section>
-<form id="chatForm" class="composer"><textarea id="input" rows="1" placeholder="Message ProjectSyntra..." autocomplete="off"></textarea><button id="send" type="submit">➤</button></form>
-<p class="disclaimer">AI can make mistakes. Verify important information.</p></main></div>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#080a10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ProjectSyntra">
+  <meta name="description" content="ProjectSyntra AI chat">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <title>ProjectSyntra</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside id="sidebar" class="sidebar">
+      <div class="brand">
+        <div class="logo">S</div>
+        <div class="brand-copy">
+          <strong>ProjectSyntra</strong>
+          <span>AI workspace</span>
+        </div>
+      </div>
 
-<div id="authModal" class="modal hidden"><div class="modal-card"><button class="modal-close" data-close="authModal">×</button><h2>ProjectSyntra Account</h2><p id="authIntro">Sign in or create an account.</p><div class="tabs"><button id="loginTab" class="active" type="button">Sign in</button><button id="signupTab" type="button">Create account</button></div><input id="authEmail" type="email" placeholder="Email" autocomplete="email"><input id="authPassword" type="password" placeholder="Password" autocomplete="current-password"><button id="authSubmit" class="primary-button" type="button">Sign in</button><button id="signOutButton" class="secondary-button hidden" type="button">Sign out</button><p id="authStatus" class="modal-status"></p></div></div>
-<div id="personalityModal" class="modal hidden"><div class="modal-card"><button class="modal-close" data-close="personalityModal">×</button><h2>AI Personality</h2><p>Customize how ProjectSyntra responds.</p><textarea id="personalityInput" class="personality-input" placeholder="Be concise, friendly, technical, and explain things with examples."></textarea><button id="savePersonality" class="primary-button" type="button">Save personality</button></div></div>
-<div id="modelMenu" class="model-menu hidden"><button type="button" data-model="openai/gpt-oss-20b">GPT-OSS 20B <span>Free</span></button></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="/app.js"></script>
-</body></html>
+      <button id="newChat" class="new-chat" type="button">
+        <span>＋</span> New chat
+      </button>
+
+      <div class="history-heading">
+        <span>Chats</span>
+        <small id="chatCount">0</small>
+      </div>
+      <div id="chatHistory" class="chat-history"></div>
+
+      <div class="sidebar-spacer"></div>
+
+      <div class="sidebar-card">
+        <div class="status-dot"></div>
+        <div>
+          <strong>Server connected</strong>
+          <span>API key stays on the server.</span>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <span>Model</span>
+        <code id="sidebarModel">GPT-OSS 20B</code>
+      </div>
+    </aside>
+
+    <main class="chat">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="menuButton" class="icon-button mobile-only" type="button" aria-label="Open chats">☰</button>
+          <div class="mobile-logo">S</div>
+          <div class="topbar-title">
+            <h1>ProjectSyntra</h1>
+            <p id="modelLabel">GPT-OSS 20B</p>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <button id="modelSelect" class="toolbar-button" type="button">GPT-OSS 20B <span>⌄</span></button>
+          <button id="personalityButton" class="icon-button" type="button" aria-label="AI personality">✦</button>
+          <button id="authButton" class="icon-button" type="button" aria-label="Account">👤</button>
+          <button id="clearChat" class="icon-button" type="button" aria-label="New chat">⌫</button>
+        </div>
+      </header>
+
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <div id="attachments" class="attachments hidden"></div>
+
+      <form id="chatForm" class="composer">
+        <input id="fileInput" type="file" multiple hidden
+          accept=".txt,.md,.markdown,.json,.js,.jsx,.ts,.tsx,.html,.htm,.css,.scss,.csv,.xml,.yaml,.yml,.py,.java,.c,.cpp,.h,.hpp,.rs,.go,.php,.sql,.sh,.bat,.ps1,.lua,.sx">
+        <button id="attachButton" class="composer-icon" type="button" aria-label="Attach files">＋</button>
+        <textarea id="input" rows="1" placeholder="Message ProjectSyntra..." autocomplete="off"></textarea>
+        <button id="send" class="send-button" type="submit" aria-label="Send message">➤</button>
+      </form>
+
+      <p class="disclaimer">AI can make mistakes. Verify important information.</p>
+    </main>
+  </div>
+
+  <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
+
+  <div id="authModal" class="modal hidden">
+    <div class="modal-card">
+      <button class="modal-close" data-close="authModal" type="button">×</button>
+      <div class="modal-icon">👤</div>
+      <h2>ProjectSyntra Account</h2>
+      <p id="authIntro">Sign in or create an account to keep your workspace separated by account.</p>
+      <div class="tabs">
+        <button id="loginTab" class="active" type="button">Sign in</button>
+        <button id="signupTab" type="button">Create account</button>
+      </div>
+      <input id="authEmail" type="email" placeholder="Email" autocomplete="email">
+      <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password">
+      <button id="authSubmit" class="primary-button" type="button">Sign in</button>
+      <button id="signOutButton" class="secondary-button hidden" type="button">Sign out</button>
+      <p id="authStatus" class="modal-status"></p>
+    </div>
+  </div>
+
+  <div id="personalityModal" class="modal hidden">
+    <div class="modal-card">
+      <button class="modal-close" data-close="personalityModal" type="button">×</button>
+      <div class="modal-icon">✦</div>
+      <h2>AI Personality</h2>
+      <p>Tell ProjectSyntra how you want it to respond. This setting is saved on this device.</p>
+      <textarea id="personalityInput" class="personality-input" placeholder="Be concise, friendly, technical, and explain things with examples."></textarea>
+      <button id="savePersonality" class="primary-button" type="button">Save personality</button>
+    </div>
+  </div>
+
+  <div id="modelMenu" class="model-menu hidden">
+    <button type="button" data-model="openai/gpt-oss-20b">
+      <span>GPT-OSS 20B</span><small>Free</small>
+    </button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
