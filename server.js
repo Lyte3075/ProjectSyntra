@@ -12,6 +12,8 @@ const app = express();
 const port = Number(process.env.PORT) || 10000;
 const model = "openai/gpt-oss-20b";
 const geminiModel = "gemini-3.6-flash";
+const pollinationsImageModel = "black-forest-labs/flux.1-schnell";
+const pollinationsVideoModel = "alibaba/wan-2.2-fast";
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabasePublishableKey =
@@ -20,6 +22,7 @@ const authEnabled = Boolean(supabaseUrl && supabasePublishableKey);
 
 if (!process.env.GROQ_API_KEY) console.warn("GROQ_API_KEY is not set.");
 if (!process.env.GEMINI_API_KEY) console.warn("GEMINI_API_KEY is not set. Image/file understanding will be unavailable.");
+if (!process.env.POLLINATIONS_API_KEY) console.warn("POLLINATIONS_API_KEY is not set. Image/video generation will be unavailable.");
 if (!authEnabled) console.warn("Supabase auth is disabled.");
 
 const gemini = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
@@ -57,7 +60,11 @@ app.get("/api/config", (_req, res) =>
     models: [
       { id: "auto", name: "Auto", free: true, description: "Chooses the best available model for each request" },
       { id: model, name: "GPT-OSS 20B", free: true },
-      { id: geminiModel, name: "Gemini 3.6 Flash", free: true, multimodal: true }
+      { id: geminiModel, name: "Gemini 3.6 Flash", free: true, multimodal: true },
+      ...(process.env.POLLINATIONS_API_KEY ? [
+        { id: "pollinations-image", name: "Pollinations Image", free: true, imageGeneration: true },
+        { id: "pollinations-video", name: "Pollinations Video", free: true, videoGeneration: true }
+      ] : [])
     ]
   })
 );
@@ -68,6 +75,7 @@ app.get("/api/health", (_req, res) =>
     model,
     configured: Boolean(process.env.GROQ_API_KEY),
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    pollinationsConfigured: Boolean(process.env.POLLINATIONS_API_KEY),
     authEnabled
   })
 );
@@ -99,15 +107,28 @@ function latestUserPrompt(messages) {
   return [...messages].reverse().find(m => m.role === "user")?.content || "";
 }
 
+function isImageGenerationPrompt(prompt) {
+  return /\b(generate|create|make|draw|render|design|produce|paint|illustrate|visualize)\b[\\s\\S]{0,120}\b(image|picture|photo|illustration|art|artwork|logo|wallpaper|icon|poster|banner)\b/i.test(prompt)
+    || /\b(make|create|generate|draw)\b\s+(me\s+)?(an?\s+)?(image|picture|logo|wallpaper|illustration|artwork|photo)\b/i.test(prompt);
+}
+
+function isVideoGenerationPrompt(prompt) {
+  return /\b(generate|create|make|draw|render|produce)\b[\\s\\S]{0,120}\b(video|clip|animation|movie|film)\b/i.test(prompt)
+    || /\b(make|create|generate)\b\s+(me\s+)?(a\s+)?(video|clip|animation|movie|film)\b/i.test(prompt);
+}
+
 function chooseModel({ messages, attachments }) {
+  const prompt = latestUserPrompt(messages);
+
+  if (isVideoGenerationPrompt(prompt)) return "pollinations-video";
+  if (isImageGenerationPrompt(prompt)) return "pollinations-image";
   if (attachments.length) return geminiModel;
 
-  const prompt = latestUserPrompt(messages).toLowerCase();
-
-  const visionOrMedia = /\b(image|photo|picture|screenshot|pdf|document|diagram|chart|visual|look at|see this|analyze this)\b/.test(prompt);
-  const deepReasoning = /\b(reason|reasoning|prove|proof|derive|derivation|debug|debugging|analyze|analysis|compare|comparison|math|mathematics|algorithm|architecture|edge case|trade-?off|explain why)\b/.test(prompt);
-  const creative = /\b(write|rewrite|story|poem|lyrics|creative|brainstorm|idea|ideas|name|names|concept|script|dialogue)\b/.test(prompt);
-  const coding = /\b(code|coding|program|programming|javascript|typescript|python|html|css|sql|api|function|bug|error|compile|compiler|syntax|repository|github|singulax)\b/.test(prompt);
+  const lower = prompt.toLowerCase();
+  const visionOrMedia = /\b(image|photo|picture|screenshot|pdf|document|diagram|chart|visual|look at|see this|analyze this)\b/.test(lower);
+  const deepReasoning = /\b(reason|reasoning|prove|proof|derive|derivation|debug|debugging|analyze|analysis|compare|comparison|math|mathematics|algorithm|architecture|edge case|trade-?off|explain why)\b/.test(lower);
+  const creative = /\b(write|rewrite|story|poem|lyrics|creative|brainstorm|idea|ideas|name|names|concept|script|dialogue)\b/.test(lower);
+  const coding = /\b(code|coding|program|programming|javascript|typescript|python|html|css|sql|api|function|bug|error|compile|compiler|syntax|repository|github|singulax)\b/.test(lower);
 
   if (visionOrMedia || deepReasoning) return geminiModel;
   if (coding || creative) return model;
@@ -206,6 +227,75 @@ async function streamGemini({ messages, attachments, res }) {
   res.end();
 }
 
+async function generatePollinationsMedia({ kind, prompt, res }) {
+  const apiKey = process.env.POLLINATIONS_API_KEY;
+  if (!apiKey) {
+    throw Object.assign(
+      new Error("Pollinations is not configured yet. Add POLLINATIONS_API_KEY in Render."),
+      { status: 503 }
+    );
+  }
+
+  const modelId = kind === "video" ? pollinationsVideoModel : pollinationsImageModel;
+  const endpoint = kind === "video" ? "video" : "image";
+  const params = new URLSearchParams({ model: modelId });
+
+  if (kind === "video") {
+    params.set("duration", "5");
+    params.set("aspectRatio", /\b(vertical|portrait|phone|tiktok|reels|9:16)\b/i.test(prompt) ? "9:16" : "16:9");
+  } else {
+    params.set("width", "1024");
+    params.set("height", "1024");
+  }
+
+  const url = "https://gen.pollinations.ai/" + endpoint + "/" + encodeURIComponent(prompt.slice(0, 12000)) + "?" + params.toString();
+
+  const response = await fetch(url, {
+    headers: { Authorization: "Bearer " + apiKey }
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    const error = new Error(
+      "Pollinations " + kind + " generation failed (" + response.status + ")." +
+      (detail ? " " + detail.slice(0, 500) : "")
+    );
+    error.status = response.status === 402 ? 402 : 502;
+    throw error;
+  }
+
+  const linkHeader = response.headers.get("link") || "";
+  const match = linkHeader.match(/<([^>]+)>;?\s*rel="?enclosure"?/i) || linkHeader.match(/<([^>]+)>/);
+  const mediaUrl = match?.[1] || "";
+
+  if (!mediaUrl) {
+    throw Object.assign(
+      new Error("Pollinations generated the media, but did not return a public media URL."),
+      { status: 502 }
+    );
+  }
+
+  res.status(200);
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  res.write("data: " + JSON.stringify({
+    type: "media",
+    mediaType: kind,
+    url: mediaUrl,
+    model: modelId
+  }) + "\n\n");
+
+  res.write("data: " + JSON.stringify({
+    type: "done",
+    model: kind === "video" ? "pollinations-video" : "pollinations-image"
+  }) + "\n\n");
+  res.end();
+}
+
 app.post("/api/chat", async (req, res) => {
   const user = await authenticate(req, res);
   if (!user) return;
@@ -224,12 +314,20 @@ app.post("/api/chat", async (req, res) => {
         ? chooseModel({ messages, attachments: safeAttachments })
         : requestedModel;
 
+    if ((effectiveModel === "pollinations-image" || effectiveModel === "pollinations-video") && !process.env.POLLINATIONS_API_KEY) {
+      return res.status(503).json({ error: "Image/video generation is not configured yet. Add POLLINATIONS_API_KEY in Render." });
+    }
+
     if (hasAttachments && !process.env.GEMINI_API_KEY) {
       return res.status(503).json({ error: "Gemini is not configured yet. Add GEMINI_API_KEY in Render." });
     }
 
     if (effectiveModel === model && !process.env.GROQ_API_KEY) {
       return res.status(503).json({ error: "The server API key has not been configured yet." });
+    }
+
+    if (![model, geminiModel, "auto", "pollinations-image", "pollinations-video"].includes(effectiveModel)) {
+      return res.status(400).json({ error: "That model is not available on the current configuration." });
     }
 
     if (effectiveModel === geminiModel && !process.env.GEMINI_API_KEY) {
@@ -254,6 +352,16 @@ app.post("/api/chat", async (req, res) => {
 
     const autoMode = requestedModel === "auto" || !requestedModel;
     const useGemini = effectiveModel === geminiModel && Boolean(process.env.GEMINI_API_KEY);
+    const usePollinationsImage = effectiveModel === "pollinations-image";
+    const usePollinationsVideo = effectiveModel === "pollinations-video";
+
+    if (usePollinationsImage || usePollinationsVideo) {
+      return await generatePollinationsMedia({
+        kind: usePollinationsVideo ? "video" : "image",
+        prompt: latestUserPrompt(safeMessages),
+        res
+      });
+    }
 
     if (useGemini) {
       return await streamGemini({
