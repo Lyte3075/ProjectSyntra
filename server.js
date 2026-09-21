@@ -9,7 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT) || 10000;
 const model = "openai/gpt-oss-20b";
 const geminiModel = "gemini-2.5-flash";
 
@@ -36,6 +36,7 @@ const supabase = authEnabled
   : null;
 
 app.disable("x-powered-by");
+app.set("etag", false);
 
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -246,4 +247,6 @@ app.get("*splat", (_req, res) =>
   res.sendFile(path.join(__dirname, "public", "index.html"))
 );
 
-app.listen(port, () => console.log("ProjectSyntra running on port " + port));
+const server = app.listen(port, "0.0.0.0", () => console.log("ProjectSyntra running on port " + port));
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 125000;
