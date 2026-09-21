@@ -1,31 +1,540 @@
-const $=s=>document.querySelector(s),messagesEl=$("#messages"),form=$("#chatForm"),input=$("#input"),send=$("#send"),historyEl=$("#chatHistory"),authButton=$("#authButton"),authModal=$("#authModal"),authEmail=$("#authEmail"),authPassword=$("#authPassword"),authSubmit=$("#authSubmit"),signOutButton=$("#signOutButton"),authStatus=$("#authStatus"),loginTab=$("#loginTab"),signupTab=$("#signupTab"),personalityButton=$("#personalityButton"),personalityModal=$("#personalityModal"),personalityInput=$("#personalityInput"),savePersonality=$("#savePersonality"),modelSelect=$("#modelSelect"),modelMenu=$("#modelMenu");
-let chats=[],activeChatId=null,conversation=[],authMode="login",selectedModel="openai/gpt-oss-20b",supabaseClient=null,authEnabled=false,currentUser=null;
-const uid=()=>crypto.randomUUID?.()||Date.now()+"-"+Math.random(),key=()=>`projectsyntra-chats:${currentUser?.id||"guest"}`;
-const esc=v=>v.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
-function md(t){let h=esc(t),b=[];h=h.replace(/\`\`\`([\s\S]*?)\`\`\`/g,(_,c)=>{b.push("<pre><code>"+c.trim()+"</code></pre>");return "@@C"+(b.length-1)+"@@"});return h.replace(/\`([^\`\n]+)\`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/__([^_]+)__/g,"<strong>$1</strong>").replace(/\*([^*\n]+)\*/g,"<em>$1</em>").replace(/\n/g,"<br>").replace(/@@C(\d+)@@/g,(_,i)=>b[+i])}
-function save(){try{localStorage.setItem(key(),JSON.stringify(chats))}catch{}}
-function load(){try{chats=JSON.parse(localStorage.getItem(key())||"[]")}catch{chats=[]}if(!Array.isArray(chats))chats=[]}
-function active(){return chats.find(c=>c.id===activeChatId)}
-function newChat(){const c={id:uid(),title:"New chat",messages:[]};chats.unshift(c);activeChatId=c.id;conversation=[];save();renderHistory();render()}
-function persist(){const c=active();if(!c)return;c.messages=[...conversation];const f=conversation.find(m=>m.role==="user");if(f&&c.title==="New chat")c.title=f.content.slice(0,34)+(f.content.length>34?"…":"");save();renderHistory()}
-function renderHistory(){historyEl.innerHTML=chats.map(c=>`<button class="history-item ${c.id===activeChatId?"active":""}" data-chat-id="${c.id}" type="button"><span>${esc(c.title)}</span><small>${c.messages.length} msg</small></button>`).join("")}
-function render(){messagesEl.innerHTML="";if(!conversation.length){messagesEl.innerHTML='<div class="welcome"><div class="welcome-icon">✦</div><h2>What are we building today?</h2><p>Streaming responses, Markdown, code blocks, chat history, accounts, and a customizable AI personality.</p><div class="suggestions"><button type="button">Explain quantum computing simply</button><button type="button">Help me build a JavaScript game</button><button type="button">Review this idea and find edge cases</button></div></div>';return}conversation.forEach(m=>add(m.role,m.content))}
-function add(role,content,typing=false){document.querySelector(".welcome")?.remove();const r=document.createElement("div");r.className="message "+role;const a=document.createElement("div");a.className="avatar";a.textContent=role==="user"?"You":"S";const b=document.createElement("div");b.className="bubble"+(typing?" typing":"");b.innerHTML=role==="assistant"?md(content):esc(content).replace(/\n/g,"<br>");r.append(a,b);messagesEl.appendChild(r);messagesEl.scrollTop=messagesEl.scrollHeight;return b}
-function personality(){return localStorage.getItem("projectsyntra-personality")||"You are ProjectSyntra, a helpful, accurate, concise AI assistant. Use Markdown when useful. Be friendly and explain things clearly."}
-async function token(){if(!supabaseClient)return"";return (await supabaseClient.auth.getSession()).data.session?.access_token||""}
-async function sendMessage(text){if(!active())newChat();conversation.push({role:"user",content:text});persist();add("user",text);const b=add("assistant","Thinking…",true);send.disabled=input.disabled=true;let answer="";try{const t=await token(),r=await fetch("/api/chat",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},t?{Authorization:"Bearer "+t}:{}),body:JSON.stringify({model:selectedModel,messages:[{role:"system",content:personality()},...conversation]})});if(!r.ok){let d={};try{d=await r.json()}catch{}throw Error(d.error||"Request failed ("+r.status+").")}b.textContent="";b.classList.remove("typing");const rd=r.body.getReader(),de=new TextDecoder();let buf="";while(true){const x=await rd.read();if(x.done)break;buf+=de.decode(x.value,{stream:true});const ps=buf.split("\n\n");buf=ps.pop();for(const p of ps){const l=p.split("\n").find(v=>v.startsWith("data: "));if(!l)continue;const e=JSON.parse(l.slice(6));if(e.type==="delta"){answer+=e.text;b.innerHTML=md(answer);messagesEl.scrollTop=messagesEl.scrollHeight}if(e.type==="error")throw Error(e.error)}}if(!answer)answer="The model returned an empty response.";conversation.push({role:"assistant",content:answer});persist()}catch(e){b.classList.remove("typing");b.innerHTML='<span class="error-text">'+esc(e.message)+'</span>';conversation.pop();persist()}finally{send.disabled=input.disabled=false;input.focus()}}
-function open(m){m.classList.remove("hidden")}function close(m){m.classList.add("hidden")}
-function updateAuth(){authButton.textContent=currentUser?"✓":"👤";authButton.title=currentUser?currentUser.email:"Account";signOutButton.classList.toggle("hidden",!currentUser);authSubmit.classList.toggle("hidden",!!currentUser);authEmail.classList.toggle("hidden",!!currentUser);authPassword.classList.toggle("hidden",!!currentUser);loginTab.classList.toggle("hidden",!!currentUser);signupTab.classList.toggle("hidden",!!currentUser)}
-async function setup(){const c=await (await fetch("/api/config")).json();authEnabled=!!c.authEnabled;if(c.models?.length){selectedModel=c.models[0].id;modelSelect.textContent=c.models[0].name+" ▾";$("#modelLabel").textContent=c.models[0].name;$("#sidebarModel").textContent=c.models[0].name}if(authEnabled&&window.supabase){supabaseClient=window.supabase.createClient(c.supabaseUrl,c.supabaseAnonKey);currentUser=(await supabaseClient.auth.getUser()).data.user||null;supabaseClient.auth.onAuthStateChange((_e,s)=>{currentUser=s?.user||null;load();if(!active())newChat();updateAuth()})}load();if(!active())newChat();updateAuth()}
-async function auth(){if(!supabaseClient){authStatus.textContent="Accounts are not enabled on the server yet.";return}authSubmit.disabled=true;const e=authEmail.value.trim(),p=authPassword.value,r=authMode==="signup"?await supabaseClient.auth.signUp({email:e,password:p}):await supabaseClient.auth.signInWithPassword({email:e,password:p});authSubmit.disabled=false;if(r.error){authStatus.textContent=r.error.message;return}if(authMode==="signup"&&!r.data.session){authStatus.textContent="Account created. Check your email, then sign in.";return}currentUser=r.data.user;close(authModal);load();if(!active())newChat();updateAuth()}
-form.addEventListener("submit",e=>{e.preventDefault();const t=input.value.trim();if(t&&!send.disabled){input.value="";input.style.height="auto";sendMessage(t)}});
-input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();form.requestSubmit()}});
-input.addEventListener("input",()=>{input.style.height="auto";input.style.height=Math.min(input.scrollHeight,180)+"px"});
-$("#newChat").addEventListener("click",newChat);$("#clearChat").addEventListener("click",newChat);historyEl.addEventListener("click",e=>{const x=e.target.closest("[data-chat-id]");if(x){const c=chats.find(c=>c.id===x.dataset.chatId);if(c){activeChatId=c.id;conversation=[...c.messages];renderHistory();render()}}});
-document.addEventListener("click",e=>{const s=e.target.closest(".suggestions button");if(s){input.value=s.textContent;form.requestSubmit()}const c=e.target.closest("[data-close]");if(c)close($("#"+c.dataset.close))});
-authButton.addEventListener("click",()=>{authStatus.textContent=authEnabled?"":"Guest mode. Add Supabase settings in Render to enable accounts.";open(authModal)});
-loginTab.addEventListener("click",()=>{authMode="login";loginTab.classList.add("active");signupTab.classList.remove("active");authSubmit.textContent="Sign in"});signupTab.addEventListener("click",()=>{authMode="signup";signupTab.classList.add("active");loginTab.classList.remove("active");authSubmit.textContent="Create account"});authSubmit.addEventListener("click",auth);
-signOutButton.addEventListener("click",async()=>{await supabaseClient?.auth.signOut();currentUser=null;close(authModal);updateAuth();load();if(!active())newChat()});
-personalityButton.addEventListener("click",()=>{personalityInput.value=personality();open(personalityModal)});savePersonality.addEventListener("click",()=>{localStorage.setItem("projectsyntra-personality",personalityInput.value.trim()||personality());close(personalityModal)});
-modelSelect.addEventListener("click",()=>modelMenu.classList.toggle("hidden"));modelMenu.addEventListener("click",e=>{const o=e.target.closest("[data-model]");if(o){selectedModel=o.dataset.model;modelSelect.textContent=o.textContent.replace("Free","").trim()+" ▾";modelMenu.classList.add("hidden")}});
+const $ = s => document.querySelector(s);
+const messagesEl = $("#messages");
+const form = $("#chatForm");
+const input = $("#input");
+const send = $("#send");
+const historyEl = $("#chatHistory");
+const chatCount = $("#chatCount");
+const authButton = $("#authButton");
+const authModal = $("#authModal");
+const authEmail = $("#authEmail");
+const authPassword = $("#authPassword");
+const authSubmit = $("#authSubmit");
+const signOutButton = $("#signOutButton");
+const authStatus = $("#authStatus");
+const loginTab = $("#loginTab");
+const signupTab = $("#signupTab");
+const personalityButton = $("#personalityButton");
+const personalityModal = $("#personalityModal");
+const personalityInput = $("#personalityInput");
+const savePersonality = $("#savePersonality");
+const modelSelect = $("#modelSelect");
+const modelMenu = $("#modelMenu");
+const fileInput = $("#fileInput");
+const attachButton = $("#attachButton");
+const attachmentsEl = $("#attachments");
+const sidebar = $("#sidebar");
+const sidebarBackdrop = $("#sidebarBackdrop");
+const menuButton = $("#menuButton");
+
+let chats = [];
+let activeChatId = null;
+let conversation = [];
+let pendingFiles = [];
+let authMode = "login";
+let selectedModel = "openai/gpt-oss-20b";
+let supabaseClient = null;
+let authEnabled = false;
+let currentUser = null;
+
+const uid = () => crypto.randomUUID?.() || Date.now() + "-" + Math.random();
+const key = () => `projectsyntra-chats:${currentUser?.id || "guest"}`;
+
+const esc = value => String(value).replace(/[&<>"']/g, c => ({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+}[c]));
+
+function md(text) {
+  let html = esc(text);
+  const blocks = [];
+  html = html.replace(/\`\`\`([\s\S]*?)\`\`\`/g, (_, code) => {
+    blocks.push("<pre><code>" + code.trim() + "</code></pre>");
+    return "@@CODE" + (blocks.length - 1) + "@@";
+  });
+  html = html
+    .replace(/\`([^\`\n]+)\`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+    .replace(/\n/g, "<br>");
+  return html.replace(/@@CODE(\d+)@@/g, (_, i) => blocks[+i]);
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / 1024 / 1024).toFixed(1) + " MB";
+}
+
+function save() {
+  try {
+    localStorage.setItem(key(), JSON.stringify(chats));
+  } catch {}
+}
+
+function load() {
+  try {
+    chats = JSON.parse(localStorage.getItem(key()) || "[]");
+  } catch {
+    chats = [];
+  }
+  if (!Array.isArray(chats)) chats = [];
+}
+
+function active() {
+  return chats.find(c => c.id === activeChatId);
+}
+
+function newChat() {
+  const c = { id: uid(), title: "New chat", messages: [] };
+  chats.unshift(c);
+  activeChatId = c.id;
+  conversation = [];
+  pendingFiles = [];
+  save();
+  renderHistory();
+  render();
+  renderAttachments();
+  closeSidebar();
+}
+
+function persist() {
+  const c = active();
+  if (!c) return;
+  c.messages = [...conversation];
+  const first = conversation.find(m => m.role === "user");
+  if (first && c.title === "New chat") {
+    c.title = first.content.slice(0, 36) + (first.content.length > 36 ? "…" : "");
+  }
+  save();
+  renderHistory();
+}
+
+function renderHistory() {
+  chatCount.textContent = chats.length;
+  historyEl.innerHTML = chats.map(c =>
+    `<button class="history-item ${c.id === activeChatId ? "active" : ""}" data-chat-id="${c.id}" type="button">
+      <span>${esc(c.title)}</span><small>${c.messages.length} message${c.messages.length === 1 ? "" : "s"}</small>
+    </button>`
+  ).join("");
+}
+
+function welcome() {
+  return `<div class="welcome">
+    <div class="welcome-icon">✦</div>
+    <h2>What are we building today?</h2>
+    <p>Chat, code, explore ideas, and attach text or source files when you want ProjectSyntra to work with them.</p>
+    <div class="suggestions">
+      <button type="button">Explain quantum computing simply</button>
+      <button type="button">Help me build a JavaScript game</button>
+      <button type="button">Review this idea and find edge cases</button>
+    </div>
+  </div>`;
+}
+
+function render() {
+  messagesEl.innerHTML = "";
+  if (!conversation.length) {
+    messagesEl.innerHTML = welcome();
+    return;
+  }
+  conversation.forEach(m => addMessage(m.role, m.content));
+}
+
+function addMessage(role, content, typing = false) {
+  document.querySelector(".welcome")?.remove();
+  const row = document.createElement("div");
+  row.className = "message " + role;
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  avatar.textContent = role === "user" ? "You" : "S";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble" + (typing ? " typing" : "");
+  bubble.innerHTML = role === "assistant" ? md(content) : esc(content).replace(/\n/g, "<br>");
+  row.append(avatar, bubble);
+  messagesEl.appendChild(row);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return bubble;
+}
+
+function personality() {
+  return localStorage.getItem("projectsyntra-personality") ||
+    "You are ProjectSyntra, a helpful, accurate, concise AI assistant. Use Markdown when useful. Be friendly and explain things clearly.";
+}
+
+async function token() {
+  if (!supabaseClient) return "";
+  return (await supabaseClient.auth.getSession()).data.session?.access_token || "";
+}
+
+function renderAttachments() {
+  attachmentsEl.classList.toggle("hidden", !pendingFiles.length);
+  attachmentsEl.innerHTML = pendingFiles.map((f, i) =>
+    `<div class="attachment">
+      <span>📎</span>
+      <span class="attachment-name">${esc(f.name)}</span>
+      <span class="attachment-size">${formatSize(f.size)}</span>
+      <button class="attachment-remove" type="button" data-remove-file="${i}" aria-label="Remove file">×</button>
+    </div>`
+  ).join("");
+}
+
+async function readFile(file) {
+  const max = 700 * 1024;
+  if (file.size > max) throw new Error(`${file.name} is too large. Keep text files under 700 KB.`);
+  const text = await file.text();
+  return {
+    name: file.name,
+    size: file.size,
+    type: file.type || "text/plain",
+    text
+  };
+}
+
+async function addFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  if (pendingFiles.length + files.length > 5) {
+    alert("You can attach up to 5 files at once.");
+    return;
+  }
+
+  for (const file of files) {
+    try {
+      const parsed = await readFile(file);
+      pendingFiles.push(parsed);
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+  renderAttachments();
+}
+
+function buildUserContent(text) {
+  if (!pendingFiles.length) return text;
+  const fileText = pendingFiles.map(f =>
+    `\n\n--- FILE: ${f.name} ---\n\`\`\`\n${f.text}\n\`\`\``
+  ).join("");
+  return text + fileText;
+}
+
+async function sendMessage(text) {
+  if (!active()) newChat();
+
+  const userContent = buildUserContent(text);
+  conversation.push({ role: "user", content: userContent });
+  persist();
+  addMessage("user", userContent);
+
+  const sentFiles = pendingFiles;
+  pendingFiles = [];
+  renderAttachments();
+
+  const bubble = addMessage("assistant", "Thinking…", true);
+  send.disabled = true;
+  input.disabled = true;
+  attachButton.disabled = true;
+
+  let answer = "";
+
+  try {
+    const t = await token();
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: Object.assign(
+        { "Content-Type": "application/json" },
+        t ? { Authorization: "Bearer " + t } : {}
+      ),
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [
+          { role: "system", content: personality() },
+          ...conversation
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      let data = {};
+      try { data = await response.json(); } catch {}
+      throw Error(data.error || "Request failed (" + response.status + ").");
+    }
+
+    bubble.textContent = "";
+    bubble.classList.remove("typing");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        const line = part.split("\n").find(v => v.startsWith("data: "));
+        if (!line) continue;
+        const event = JSON.parse(line.slice(6));
+
+        if (event.type === "delta") {
+          answer += event.text;
+          bubble.innerHTML = md(answer);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        if (event.type === "error") throw Error(event.error);
+      }
+    }
+
+    if (!answer) answer = "The model returned an empty response.";
+    conversation.push({ role: "assistant", content: answer });
+    persist();
+  } catch (error) {
+    bubble.classList.remove("typing");
+    bubble.innerHTML = '<span class="error-text">' + esc(error.message) + "</span>";
+    conversation.pop();
+    persist();
+    pendingFiles = sentFiles;
+    renderAttachments();
+  } finally {
+    send.disabled = false;
+    input.disabled = false;
+    attachButton.disabled = false;
+    input.focus();
+  }
+}
+
+function open(modal) { modal.classList.remove("hidden"); }
+function close(modal) { modal.classList.add("hidden"); }
+
+function closeSidebar() {
+  sidebar.classList.remove("open");
+  sidebarBackdrop.classList.add("hidden");
+}
+
+function updateAuth() {
+  authButton.textContent = currentUser ? "✓" : "👤";
+  authButton.title = currentUser ? (currentUser.email || "Signed in") : "Account";
+  signOutButton.classList.toggle("hidden", !currentUser);
+  authSubmit.classList.toggle("hidden", !!currentUser);
+  authEmail.classList.toggle("hidden", !!currentUser);
+  authPassword.classList.toggle("hidden", !!currentUser);
+  loginTab.classList.toggle("hidden", !!currentUser);
+  signupTab.classList.toggle("hidden", !!currentUser);
+  $("#authIntro").textContent = currentUser
+    ? (currentUser.email || "Signed in")
+    : "Sign in or create an account to keep your workspace separated by account.";
+}
+
+async function setup() {
+  const config = await (await fetch("/api/config")).json();
+  authEnabled = !!config.authEnabled;
+
+  if (config.models?.length) {
+    selectedModel = config.models[0].id;
+    modelSelect.innerHTML = config.models[0].name + " <span>⌄</span>";
+    $("#modelLabel").textContent = config.models[0].name;
+    $("#sidebarModel").textContent = config.models[0].name;
+  }
+
+  if (authEnabled && window.supabase) {
+    supabaseClient = window.supabase.createClient(
+      config.supabaseUrl,
+      config.supabasePublishableKey
+    );
+    currentUser = (await supabaseClient.auth.getUser()).data.user || null;
+
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+      currentUser = session?.user || null;
+      load();
+      if (!active()) newChat();
+      else render();
+      updateAuth();
+    });
+  }
+
+  load();
+  if (!active()) newChat();
+  else {
+    conversation = [...active().messages];
+    renderHistory();
+    render();
+  }
+  updateAuth();
+}
+
+async function auth() {
+  if (!supabaseClient) {
+    authStatus.textContent = "Accounts are not enabled on the server yet. Add the Supabase variables in Render.";
+    return;
+  }
+
+  const email = authEmail.value.trim();
+  const password = authPassword.value;
+
+  if (!email || password.length < 6) {
+    authStatus.textContent = "Enter an email and a password with at least 6 characters.";
+    return;
+  }
+
+  authSubmit.disabled = true;
+
+  const result = authMode === "signup"
+    ? await supabaseClient.auth.signUp({ email, password })
+    : await supabaseClient.auth.signInWithPassword({ email, password });
+
+  authSubmit.disabled = false;
+
+  if (result.error) {
+    authStatus.textContent = result.error.message;
+    return;
+  }
+
+  if (authMode === "signup" && !result.data.session) {
+    authStatus.textContent = "Account created. Check your email, then sign in.";
+    return;
+  }
+
+  currentUser = result.data.user;
+  close(authModal);
+  load();
+  if (!active()) newChat();
+  else {
+    conversation = [...active().messages];
+    renderHistory();
+    render();
+  }
+  updateAuth();
+}
+
+form.addEventListener("submit", event => {
+  event.preventDefault();
+  const text = input.value.trim();
+  if ((text || pendingFiles.length) && !send.disabled) {
+    input.value = "";
+    input.style.height = "auto";
+    sendMessage(text || "Please review the attached file(s).");
+  }
+});
+
+input.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+input.addEventListener("input", () => {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 180) + "px";
+});
+
+attachButton.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => {
+  addFiles(fileInput.files);
+  fileInput.value = "";
+});
+
+attachmentsEl.addEventListener("click", event => {
+  const button = event.target.closest("[data-remove-file]");
+  if (!button) return;
+  pendingFiles.splice(Number(button.dataset.removeFile), 1);
+  renderAttachments();
+});
+
+$("#newChat").addEventListener("click", newChat);
+$("#clearChat").addEventListener("click", newChat);
+
+historyEl.addEventListener("click", event => {
+  const item = event.target.closest("[data-chat-id]");
+  if (!item) return;
+  const chat = chats.find(c => c.id === item.dataset.chatId);
+  if (!chat) return;
+  activeChatId = chat.id;
+  conversation = [...chat.messages];
+  renderHistory();
+  render();
+  closeSidebar();
+});
+
+document.addEventListener("click", event => {
+  const suggestion = event.target.closest(".suggestions button");
+  if (suggestion) {
+    input.value = suggestion.textContent;
+    form.requestSubmit();
+  }
+
+  const closeButton = event.target.closest("[data-close]");
+  if (closeButton) close($("#" + closeButton.dataset.close));
+});
+
+authButton.addEventListener("click", () => {
+  authStatus.textContent = authEnabled ? "" : "Guest mode. Add Supabase settings in Render to enable accounts.";
+  open(authModal);
+});
+
+loginTab.addEventListener("click", () => {
+  authMode = "login";
+  loginTab.classList.add("active");
+  signupTab.classList.remove("active");
+  authSubmit.textContent = "Sign in";
+});
+
+signupTab.addEventListener("click", () => {
+  authMode = "signup";
+  signupTab.classList.add("active");
+  loginTab.classList.remove("active");
+  authSubmit.textContent = "Create account";
+});
+
+authSubmit.addEventListener("click", auth);
+
+signOutButton.addEventListener("click", async () => {
+  await supabaseClient?.auth.signOut();
+  currentUser = null;
+  close(authModal);
+  updateAuth();
+  load();
+  if (!active()) newChat();
+  else {
+    conversation = [...active().messages];
+    renderHistory();
+    render();
+  }
+});
+
+personalityButton.addEventListener("click", () => {
+  personalityInput.value = personality();
+  open(personalityModal);
+});
+
+savePersonality.addEventListener("click", () => {
+  localStorage.setItem(
+    "projectsyntra-personality",
+    personalityInput.value.trim() || personality()
+  );
+  close(personalityModal);
+});
+
+modelSelect.addEventListener("click", () => modelMenu.classList.toggle("hidden"));
+
+modelMenu.addEventListener("click", event => {
+  const option = event.target.closest("[data-model]");
+  if (!option) return;
+  selectedModel = option.dataset.model;
+  modelSelect.innerHTML = option.querySelector("span").textContent + " <span>⌄</span>";
+  modelMenu.classList.add("hidden");
+});
+
+menuButton.addEventListener("click", () => {
+  sidebar.classList.add("open");
+  sidebarBackdrop.classList.remove("hidden");
+});
+
+sidebarBackdrop.addEventListener("click", closeSidebar);
+
 setup();
