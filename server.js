@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import OpenAI from "openai";
 import { GoogleGenAI } from "@google/genai";
-import { GoogleGenAI } from "@google/genai";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
@@ -13,7 +12,6 @@ const app = express();
 const port = process.env.PORT || 3000;
 const model = "openai/gpt-oss-20b";
 const geminiModel = "gemini-2.5-flash";
-const geminiModel = "gemini-2.5-flash";
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabasePublishableKey =
@@ -21,11 +19,8 @@ const supabasePublishableKey =
 const authEnabled = Boolean(supabaseUrl && supabasePublishableKey);
 
 if (!process.env.GROQ_API_KEY) console.warn("GROQ_API_KEY is not set.");
-if (!process.env.GEMINI_API_KEY) console.warn("GEMINI_API_KEY is not set.");
 if (!process.env.GEMINI_API_KEY) console.warn("GEMINI_API_KEY is not set. Image/file understanding will be unavailable.");
 if (!authEnabled) console.warn("Supabase auth is disabled.");
-
-const gemini = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
 const gemini = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
@@ -70,7 +65,6 @@ app.get("/api/health", (_req, res) =>
     ok: true,
     model,
     configured: Boolean(process.env.GROQ_API_KEY),
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     authEnabled
   })
