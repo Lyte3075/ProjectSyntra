@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
@@ -10,6 +11,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
 const model = "openai/gpt-oss-20b";
+const geminiModel = "gemini-2.5-flash";
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabasePublishableKey =
@@ -17,7 +19,10 @@ const supabasePublishableKey =
 const authEnabled = Boolean(supabaseUrl && supabasePublishableKey);
 
 if (!process.env.GROQ_API_KEY) console.warn("GROQ_API_KEY is not set.");
+if (!process.env.GEMINI_API_KEY) console.warn("GEMINI_API_KEY is not set. Image/file understanding will be unavailable.");
 if (!authEnabled) console.warn("Supabase auth is disabled.");
+
+const gemini = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
 const client = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1",
@@ -40,7 +45,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "3mb" }));
+app.use(express.json({ limit: "12mb" }));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 
 app.get("/api/config", (_req, res) =>
@@ -48,7 +53,10 @@ app.get("/api/config", (_req, res) =>
     authEnabled,
     supabaseUrl: authEnabled ? supabaseUrl : null,
     supabasePublishableKey: authEnabled ? supabasePublishableKey : null,
-    models: [{ id: model, name: "GPT-OSS 20B", free: true }]
+    models: [
+      { id: model, name: "GPT-OSS 20B", free: true },
+      { id: geminiModel, name: "Gemini 2.5 Flash", free: true, multimodal: true }
+    ]
   })
 );
 
@@ -57,6 +65,7 @@ app.get("/api/health", (_req, res) =>
     ok: true,
     model,
     configured: Boolean(process.env.GROQ_API_KEY),
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     authEnabled
   })
 );
@@ -84,22 +93,84 @@ async function authenticate(req, res) {
   return data.user;
 }
 
+async function streamGemini({ messages, attachments, res }) {
+  if (!gemini) throw Object.assign(new Error("Gemini is not configured on the server."), { status: 503 });
+
+  const parts = [];
+  const systemMessage = messages.find(m => m.role === "system");
+  const recentMessages = messages.filter(m => m.role !== "system").slice(-30);
+
+  if (systemMessage?.content) {
+    parts.push({ text: "System instructions:\n" + systemMessage.content.slice(0, 20000) });
+  }
+
+  for (const message of recentMessages) {
+    const label = message.role === "assistant" ? "Assistant" : "User";
+    if (message.content) parts.push({ text: label + ":\n" + message.content.slice(0, 50000) });
+  }
+
+  for (const file of attachments) {
+    if (!file || typeof file.data !== "string" || typeof file.mimeType !== "string") continue;
+    if (file.data.length > 8_000_000) continue;
+    parts.push({
+      inlineData: {
+        mimeType: file.mimeType,
+        data: file.data
+      }
+    });
+    parts.push({ text: "The attachment above is named: " + String(file.name || "attachment").slice(0, 200) });
+  }
+
+  parts.push({
+    text: "Respond to the user's latest request. You are the multimodal side of ProjectSyntra. Analyze attached images/documents/files when present. Use Markdown when useful."
+  });
+
+  const stream = await gemini.models.generateContentStream({
+    model: geminiModel,
+    contents: parts
+  });
+
+  res.status(200);
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  for await (const chunk of stream) {
+    const text = chunk.text || "";
+    if (text) {
+      res.write("data: " + JSON.stringify({ type: "delta", text }) + "\n\n");
+    }
+  }
+
+  res.write("data: " + JSON.stringify({ type: "done", model: geminiModel }) + "\n\n");
+  res.end();
+}
+
 app.post("/api/chat", async (req, res) => {
   const user = await authenticate(req, res);
   if (!user) return;
 
   try {
-    const { messages, model: requestedModel } = req.body;
+    const { messages, model: requestedModel, attachments = [] } = req.body;
 
     if (!Array.isArray(messages) || !messages.length) {
       return res.status(400).json({ error: "messages must be a non-empty array." });
     }
 
-    if (!process.env.GROQ_API_KEY) {
+    const safeAttachments = Array.isArray(attachments) ? attachments.slice(0, 5) : [];
+    const hasAttachments = safeAttachments.length > 0;
+
+    if (hasAttachments && !process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ error: "Gemini is not configured yet. Add GEMINI_API_KEY in Render." });
+    }
+
+    if (!hasAttachments && !process.env.GROQ_API_KEY) {
       return res.status(503).json({ error: "The server API key has not been configured yet." });
     }
 
-    if (requestedModel && requestedModel !== model) {
+    if (requestedModel && ![model, geminiModel].includes(requestedModel)) {
       return res.status(400).json({ error: "That model is not available on the current configuration." });
     }
 
@@ -113,6 +184,17 @@ app.post("/api/chat", async (req, res) => {
 
     if (!safeMessages.length) {
       return res.status(400).json({ error: "No valid messages were provided." });
+    }
+
+    if (hasAttachments || requestedModel === geminiModel) {
+      if (!safeMessages.length) {
+        return res.status(400).json({ error: "No valid messages were provided." });
+      }
+      return await streamGemini({
+        messages: safeMessages,
+        attachments: safeAttachments,
+        res
+      });
     }
 
     const completion = await client.chat.completions.create({
