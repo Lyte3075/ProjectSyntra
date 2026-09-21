@@ -1,9 +1,12 @@
 {
-  "name": "union-alpha-chat",
-  "version": "1.0.0",
+  "name": "projectsyntra",
+  "version": "2.0.0",
   "private": true,
-  "description": "Standalone web chatbot powered by Union Alpha through TokenRa.",
+  "description": "ProjectSyntra, a responsive Union Alpha AI chat website.",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
